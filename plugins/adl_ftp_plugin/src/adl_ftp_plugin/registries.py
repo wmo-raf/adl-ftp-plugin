@@ -15,6 +15,15 @@ class FTPDecoder(Instance):
         if not self.type:
             raise ImproperlyConfigured("The type of an instance must be set.")
     
+    def pre_process(self, file_path):
+        """
+        This method is called before the decoding process.
+
+        :param file_path: The path to the file that should be decoded.
+        :type file_path: str
+        """
+        return file_path
+    
     def decode(self, file_path):
         """
         Decodes the given file and returns the result.

@@ -6,6 +6,7 @@
 x-adl-variables: &adl-variables
   DATABASE_URL: postgis://${WIS2BOX_ADL_DB_USER:-adl}:${WIS2BOX_ADL_DB_PASSWORD}@adl_db:5432/${WIS2BOX_ADL_DB_NAME:-adl}
   REDIS_URL: redis://adl_redis:6379/0
+  PLUGIN_RUNTIME_SETUP_MARKER: 0
 
 services:
   adl_db:

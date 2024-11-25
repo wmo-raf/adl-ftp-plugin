@@ -11,6 +11,7 @@ class Toa5Decoder(FTPDecoder):
     
     type = "toa5"
     compat_type = "campbell"
+    display_name = "TOA5"
     
     def decode(self, file_path):
         """
@@ -71,7 +72,7 @@ class Toa5Decoder(FTPDecoder):
         """
         
         if not first_line[0] == "TOA5":
-            raise ValueError("The file format is not set as TOA5.")
+            raise ValueError("The file format is not TOA5.")
         
         if not len(first_line) == 8:
             raise ValueError("The header does not contain the required number of fields.")
@@ -111,9 +112,13 @@ class Toa5Decoder(FTPDecoder):
             
             for i, column in enumerate(column_names):
                 val = line[i]
-                line_data[column] = val
+                if not val:
+                    continue
+                
                 if column == 'TIMESTAMP':
                     line_data[column] = datetime.strptime(val, "%Y-%m-%d %H:%M:%S")
+                else:
+                    line_data[column] = float(val)
             
             data.append(line_data)
         

@@ -1,6 +1,6 @@
 from django.apps import AppConfig
-
 from wis2box_adl.core.registries import plugin_registry
+
 from .registries import ftp_decoder_registry
 
 
@@ -9,6 +9,10 @@ class PluginNameConfig(AppConfig):
     name = "adl_ftp_plugin"
     
     def ready(self):
-        from .plugins import PluginNamePlugin
+        from .plugins import AdlFtpPlugin
         
-        plugin_registry.register(PluginNamePlugin())
+        plugin_registry.register(AdlFtpPlugin())
+        
+        from .decoders import Toa5Decoder, SiapMicrosDecoder
+        ftp_decoder_registry.register(Toa5Decoder())
+        ftp_decoder_registry.register(SiapMicrosDecoder())
