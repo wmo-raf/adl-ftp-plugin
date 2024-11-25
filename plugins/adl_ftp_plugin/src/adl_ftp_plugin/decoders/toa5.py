@@ -79,7 +79,7 @@ class Toa5Decoder(FTPDecoder):
         
         header_info = {
             "format": first_line[0],
-            "station_name": first_line[1],
+            "station_id": first_line[1],
             "datalogger_type": first_line[2],
             "serial_number": first_line[3],
             "os_version": first_line[4],

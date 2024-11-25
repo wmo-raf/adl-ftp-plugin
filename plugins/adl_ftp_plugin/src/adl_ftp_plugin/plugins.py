@@ -82,9 +82,9 @@ class AdlFtpPlugin(Plugin):
                         file_name = file["name"]
                         remote_file_path = normalize_path(f"{path}/{file_name}")
                         
-                        obs_date = None
-                        
-                        if extract_date_from_filename:
+                        if extract_date_from_filename and last_ingested_record:
+                            obs_date = None
+                            
                             match = re.search(datetime_pattern, file_name)
                             if match:
                                 date_str = match.group(1)
@@ -93,7 +93,7 @@ class AdlFtpPlugin(Plugin):
                             else:
                                 logger.warning(f"[ADL_FTP_PLUGIN] Could not extract date from filename {file_name}")
                             
-                            if last_ingested_record >= obs_date:
+                            if obs_date and last_ingested_record.time >= obs_date:
                                 logger.info(f"[ADL_FTP_PLUGIN] File {file_name} already ingested")
                         
                         logger.info(f"[ADL_FTP_PLUGIN] Processing file {file_name}")
@@ -105,15 +105,18 @@ class AdlFtpPlugin(Plugin):
                             data = FTPDecoder.decode(temp_file.name)
                             data_values = data.get("values")
                             
-                            line_count = len(data_values)
+                            record_count = len(data_values)
                             
-                            for i, line in enumerate(data_values):
-                                logger.info(f"[ADL_FTP_PLUGIN] Processing line {i + 1}/{line_count}")
+                            for i, record in enumerate(data_values):
                                 
-                                timestamp = line.get("TIMESTAMP")
+                                print(record, "RECORD")
+                                
+                                logger.info(f"[ADL_FTP_PLUGIN] Processing record {i + 1}/{record_count}")
+                                
+                                timestamp = record.get("TIMESTAMP")
                                 
                                 if not timestamp:
-                                    logger.warning(f"[ADL_FTP_PLUGIN] No timestamp found in line {line}")
+                                    logger.warning(f"[ADL_FTP_PLUGIN] No timestamp found in record {record}")
                                     continue
                                 
                                 utc_obs_date = dj_timezone.make_aware(timestamp, timezone)
@@ -133,7 +136,7 @@ class AdlFtpPlugin(Plugin):
                                     file_variable_name = variable_mapping.file_variable_name
                                     file_variable_units = variable_mapping.file_variable_units
                                     
-                                    value = line.get(file_variable_name)
+                                    value = record.get(file_variable_name)
                                     
                                     if value is not None:
                                         try:
@@ -173,12 +176,12 @@ class AdlFtpPlugin(Plugin):
                                     
                                     file = ContentFile(csv_content, filename)
                                     
-                                    ingestion_record = DataIngestionRecord.objects.create(
-                                        station=station,
-                                        time=utc_obs_date,
-                                        file=file)
-                                    
-                                    ingestion_record_ids.append(ingestion_record.pk)
+                                    # ingestion_record = DataIngestionRecord.objects.create(
+                                    #     station=station,
+                                    #     time=utc_obs_date,
+                                    #     file=file)
+                                    #
+                                    # ingestion_record_ids.append(ingestion_record.pk)
         
         return ingestion_record_ids
     
