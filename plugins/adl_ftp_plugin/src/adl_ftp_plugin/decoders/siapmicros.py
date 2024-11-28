@@ -190,10 +190,11 @@ class SiapMicrosDecoder(FTPDecoder):
                 obs_date = f"{year}-{month}-{day} {hh}:{mm}:{ss}"
                 obs_date = datetime.strptime(obs_date, "%Y-%m-%d %H:%M:%S")
                 
+                # extract blocks of data
                 num_of_blocks = int(line[7].split("M")[1])
                 blocks_data = line[8:8 + num_of_blocks * 3]
                 
-                # splint every 3 elements
+                # split every 3 elements
                 blocks_units_data = [blocks_data[i:i + 3] for i in range(0, len(blocks_data), 3)]
                 
                 # check if the number of blocks is correct
@@ -214,6 +215,7 @@ class SiapMicrosDecoder(FTPDecoder):
                     if not value_type in VALUE_TYPES:
                         raise ValueError(f"Invalid value type: {value_type}")
                     
+                    # convert the value to float
                     try:
                         value = float(value)
                     except ValueError:

@@ -31,3 +31,21 @@ def normalize_path(path):
         path = '/' + path.lstrip('/')
     
     return path
+
+
+def add_date_info_to_path(path, date_info):
+    # Extract year, month, and day from the date_info dictionary
+    year = str(date_info.get("year")) if date_info.get("year") else None
+    month = date_info.get("month")
+    day = date_info.get("day")
+    
+    # Build the parts list based on the presence of year, month, and day
+    parts = [str(year)]
+    if year:
+        if month:
+            parts.append(f"{int(month):02}")
+            if day:
+                parts.append(f"{int(day):02}")
+    
+    # Join the path and the parts
+    return os.path.join(path, *filter(None, parts))

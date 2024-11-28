@@ -1,5 +1,5 @@
 from django.core.exceptions import ImproperlyConfigured
-from wis2box_adl.core.registry import Registry, Instance
+from adl.core.registry import Registry, Instance
 
 
 class FTPDecoder(Instance):
