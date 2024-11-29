@@ -1,4 +1,4 @@
-from ftplib import FTP
+from ftplib import FTP, error_perm
 from io import IOBase, BytesIO
 
 from .utils import split_file_info

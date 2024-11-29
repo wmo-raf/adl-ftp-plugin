@@ -3,11 +3,13 @@ from adl.core.models import NetworkConnection, StationLink
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from modelcluster.fields import ParentalKey
+from timezone_field import TimeZoneField
 from wagtail.admin.panels import MultiFieldPanel, FieldPanel, InlinePanel
 from wagtail.models import Orderable
 from wagtail.snippets.models import register_snippet
 
 from adl_ftp_plugin.utils import get_ftp_decoder_choices
+from adl_ftp_plugin.validators import validate_start_date
 
 
 @register_snippet
@@ -57,15 +59,36 @@ class FTPStationLink(StationLink):
         ("year", _("Year")),
         ("month", _("Month")),
         ("day", _("Day")),
+        ("hour", _("Hour")),
     ]
     
-    ftp_path = models.CharField(max_length=255, verbose_name=_("FTP Path"))
+    ftp_path = models.CharField(max_length=255, verbose_name=_("FTP Path"),
+                                help_text=_("Path to the directory containing the data files"))
     file_pattern = models.CharField(max_length=255, verbose_name=_("File Pattern"))
-    dir_structured_by_date = models.BooleanField(default=False, verbose_name=_("Directory Structured by Date ?"))
+    dir_structured_by_date = models.BooleanField(default=False, verbose_name=_("Directory Structured by Date ?"),
+                                                 help_text=_("Check if the files are structured by a combination of"
+                                                             " year, month, day or hour in the FTP path. Folders "
+                                                             "structure expected to be in the format "
+                                                             "[YYYY]/[MM]/[DD]/[HH]"))
     date_granularity = models.CharField(max_length=255, blank=True, null=True, choices=DATE_GRANULARITY_CHOICES,
-                                        verbose_name=_("Date Granularity"))
+                                        verbose_name=_("Date Granularity"),
+                                        help_text=_("How far down the date hierarchy is the file located ? "
+                                                    "This will be used to construct the final name of the folder in the FTP path"))
+    timezone = TimeZoneField(default='UTC', verbose_name=_("Station Timezone"),
+                             help_text=_("Timezone used by the station for recording observations"))
+    
+    start_date = models.DateTimeField(blank=True, null=True, validators=[validate_start_date],
+                                      verbose_name=_("Start Date for Data Collection"),
+                                      help_text=_("Select a past date to include the historical data. "
+                                                  "Leave blank for collecting realtime data only"), )
+    skip_already_downloaded_files = models.BooleanField(default=True,
+                                                        verbose_name=_("Skip downloading already downloaded files"),
+                                                        help_text=_(
+                                                            "Do not download files that have already been downloaded"))
     skip_already_processed_files = models.BooleanField(default=True,
-                                                       verbose_name=_("Skip already downloaded and processed Files"))
+                                                       verbose_name=_("Skip processing already processed files"),
+                                                       help_text=_(
+                                                           "Do not process files that have already been processed"))
     
     panels = StationLink.panels + [
         MultiFieldPanel([
@@ -75,8 +98,14 @@ class FTPStationLink(StationLink):
         MultiFieldPanel([
             FieldPanel("dir_structured_by_date"),
             FieldPanel("date_granularity"),
+            FieldPanel("timezone"),
         ], heading=_("File Structure")),
-        FieldPanel("skip_already_processed_files"),
+        
+        MultiFieldPanel([
+            FieldPanel("start_date"),
+            FieldPanel("skip_already_downloaded_files"),
+            FieldPanel("skip_already_processed_files"),
+        ], heading=_("Data Collection")),
     ]
     
     class Meta:
