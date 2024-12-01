@@ -59,50 +59,31 @@ def add_date_info_to_path(path, date_info):
 
 
 def get_dates_to_now(date_granularity, timezone=None, from_date=None):
-    # if date is None, set it to the current date
     if from_date is None:
         from_date = dj_timezone.now()
     
-    # Get the current time in the timezone
-    now = dj_timezone.localtime(None, timezone)
-    
-    # Get the start date in the timezone
+    # Ensure correct timezone handling
+    now = dj_timezone.localtime(dj_timezone.now(), timezone)
     start_date = dj_timezone.localtime(from_date, timezone)
     
-    # Get the difference in years, months, days, and hours
-    years_diff = now.year - start_date.year
-    months_diff = now.month - start_date.month
-    days_diff = now.day - start_date.day
-    hours_diff = now.hour - start_date.hour
+    if start_date > now:
+        raise ValueError("from_date cannot be in the future")
     
-    # Create a list of date paths
     date_paths = []
+    current_date = start_date
     
-    # If the date granularity is year
-    if date_granularity == "year":
-        for i in range(years_diff + 1):
-            date_paths.append(start_date + relativedelta(years=i))
-    
-    # If the date granularity is month
-    elif date_granularity == "month":
-        for i in range(years_diff + 1):
-            for j in range(months_diff + 1):
-                date_paths.append(start_date + relativedelta(years=i, months=j))
-    
-    # If the date granularity is day
-    elif date_granularity == "day":
-        for i in range(years_diff + 1):
-            for j in range(months_diff + 1):
-                for k in range(days_diff + 1):
-                    date_paths.append(start_date + relativedelta(years=i, months=j, days=k))
-    
-    # If the date granularity is hour
-    elif date_granularity == "hour":
-        for i in range(years_diff + 1):
-            for j in range(months_diff + 1):
-                for k in range(days_diff + 1):
-                    for l in range(hours_diff + 1):
-                        date_paths.append(start_date + relativedelta(years=i, months=j, days=k, hours=l))
+    while current_date <= now:
+        date_paths.append(current_date)
+        if date_granularity == "year":
+            current_date += relativedelta(years=1)
+        elif date_granularity == "month":
+            current_date += relativedelta(months=1)
+        elif date_granularity == "day":
+            current_date += relativedelta(days=1)
+        elif date_granularity == "hour":
+            current_date += relativedelta(hours=1)
+        else:
+            raise ValueError("Invalid date granularity. Choose 'year', 'month', 'day', or 'hour'.")
     
     return date_paths
 

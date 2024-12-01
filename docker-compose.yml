@@ -44,9 +44,9 @@ services:
       - adl_db
       - adl_redis
     volumes:
-      - static:/wis2box_adl/app/src/wis2box_adl/static
-      - media:/wis2box_adl/app/src/wis2box_adl/media
-      - ./plugins/adl_ftp_plugin:/wis2box_adl/plugins/adl_ftp_plugin
+      - static:/adl/app/src/adl/static
+      - media:/adl/app/src/adl/media
+      - ./plugins/adl_ftp_plugin:/adl/plugins/adl_ftp_plugin
     # Open stdin and tty so when attaching key input works as expected.
     stdin_open: true
     tty: true
@@ -62,9 +62,9 @@ services:
     depends_on:
       - adl
     volumes:
-      - static:/wis2box_adl/app/src/wis2box_adl/static
-      - media:/wis2box_adl/app/src/wis2box_adl/media
-      - ./plugins/adl_ftp_plugin:/wis2box_adl/plugins/adl_ftp_plugin
+      - static:/adl/app/src/adl/static
+      - media:/adl/app/src/adl/media
+      - ./plugins/adl_ftp_plugin:/adl/plugins/adl_ftp_plugin
     # Open stdin and tty so when attaching key input works as expected.
     stdin_open: true
     tty: true
@@ -80,9 +80,9 @@ services:
     depends_on:
       - adl
     volumes:
-      - static:/wis2box_adl/app/src/wis2box_adl/static
-      - media:/wis2box_adl/app/src/wis2box_adl/media
-      - ./plugins/adl_ftp_plugin:/wis2box_adl/plugins/adl_ftp_plugin
+      - static:/adl/app/src/adl/static
+      - media:/adl/app/src/adl/media
+      - ./plugins/adl_ftp_plugin:/adl/plugins/adl_ftp_plugin
     # Open stdin and tty so when attaching key input works as expected.
     stdin_open: true
     tty: true
