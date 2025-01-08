@@ -6,14 +6,14 @@ from modelcluster.fields import ParentalKey
 from timezone_field import TimeZoneField
 from wagtail.admin.panels import MultiFieldPanel, FieldPanel, InlinePanel
 from wagtail.models import Orderable
-from wagtail.snippets.models import register_snippet
 
 from adl_ftp_plugin.utils import get_ftp_decoder_choices
 from adl_ftp_plugin.validators import validate_start_date
 
 
-@register_snippet
 class NetworkFTP(NetworkConnection):
+    station_link_model_string_label = "adl_ftp_plugin.FTPStationLink"
+    
     host = models.CharField(max_length=255, verbose_name=_("Host"))
     port = models.IntegerField(verbose_name=_("Port"))
     username = models.CharField(max_length=255, verbose_name=_("Username"))
@@ -39,7 +39,6 @@ class NetworkFTP(NetworkConnection):
         return f"{self.network} FTP"
 
 
-@register_snippet
 class FTPVariableMapping(Orderable):
     network_ftp = ParentalKey(NetworkFTP, on_delete=models.CASCADE, related_name="variable_mappings")
     file_variable_name = models.CharField(max_length=255, verbose_name=_("File Variable Name"))
@@ -53,7 +52,6 @@ class FTPVariableMapping(Orderable):
     ]
 
 
-@register_snippet
 class FTPStationLink(StationLink):
     DATE_GRANULARITY_CHOICES = [
         ("year", _("Year")),
@@ -120,7 +118,6 @@ def get_ftp_data_file_upload_path(instance, filename):
     return f"ftp_data_files/{instance.station_link.network_connection.network.id}/{instance.station_link.station.id}/{filename}"
 
 
-@register_snippet
 class FTPStationDataFile(models.Model):
     station_link = models.ForeignKey(FTPStationLink, on_delete=models.CASCADE, related_name="data_files")
     file_name = models.CharField(max_length=255, verbose_name=_("File Name"))

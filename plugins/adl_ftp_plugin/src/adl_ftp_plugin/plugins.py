@@ -7,7 +7,7 @@ from adl.core.registries import Plugin
 from django.utils import timezone as dj_timezone
 
 from .ftp import FTPClient
-from .models import NetworkFTP, FTPStationDataFile
+from .models import FTPStationDataFile
 from .registries import ftp_decoder_registry
 from .utils import (
     normalize_path,
@@ -22,7 +22,7 @@ class AdlFtpPlugin(Plugin):
     type = "adl_ftp_plugin"
     label = "ADL FTP Plugin"
     
-    network = None
+    network_ftp = None
     decoder = None
     ftp = None
     variable_mappings = None
@@ -34,14 +34,13 @@ class AdlFtpPlugin(Plugin):
     def get_decoder(decoder_name):
         return ftp_decoder_registry.get(decoder_name)
     
-    def run_process(self, network):
-        self.network = network
-        return super().run_process(network)
+    def run_process(self, network_connection):
+        self.network_ftp = network_connection
+        return super().run_process(network_connection)
     
     def get_data(self):
-        if self.network:
-            network_ftp = NetworkFTP.objects.filter(network=self.network).first()
-            decoder_name = network_ftp.decoder
+        if self.network_ftp:
+            decoder_name = self.network_ftp.decoder
             decoder = self.get_decoder(decoder_name)
             
             if not decoder:
@@ -51,23 +50,24 @@ class AdlFtpPlugin(Plugin):
             # found decoder
             self.decoder = decoder
             
-            variable_mappings = network_ftp.variable_mappings.all()
+            variable_mappings = self.network_ftp.variable_mappings.all()
             
             if not variable_mappings:
                 logger.warning(
-                    f"[ADL_FTP_PLUGIN] No variable mappings found for network {network_ftp.network.name}. Skipping...")
+                    f"[ADL_FTP_PLUGIN] No variable mappings found for network {self.network_ftp.network.name}. Skipping...")
                 return
             
             self.variable_mappings = variable_mappings
             
-            if network_ftp:
-                logger.info(f"[ADL_FTP_PLUGIN] Getting data from FTP network {network_ftp.network.name}")
+            if self.network_ftp:
+                logger.info(f"[ADL_FTP_PLUGIN] Getting data from FTP network {self.network_ftp.network.name}")
                 
                 # Create FTP client
-                self.ftp = FTPClient(host=network_ftp.host, port=network_ftp.port, user=network_ftp.username,
-                                     password=network_ftp.password)
+                self.ftp = FTPClient(host=self.network_ftp.host, port=self.network_ftp.port,
+                                     user=self.network_ftp.username,
+                                     password=self.network_ftp.password)
                 
-                station_links = network_ftp.station_links.all()
+                station_links = self.network_ftp.station_links.all()
                 
                 for station_link in station_links:
                     self.process_station_link(station_link)
