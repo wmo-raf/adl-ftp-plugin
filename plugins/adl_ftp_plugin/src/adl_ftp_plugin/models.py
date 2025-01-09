@@ -1,4 +1,4 @@
-from adl.core.models import DataParameter
+from adl.core.models import DataParameter, Unit
 from adl.core.models import NetworkConnection, StationLink
 from django.db import models
 from django.utils.translation import gettext_lazy as _
@@ -34,21 +34,18 @@ class NetworkFTP(NetworkConnection):
     class Meta:
         verbose_name = _("Network FTP")
         verbose_name_plural = _("Network FTPs")
-    
-    def __str__(self):
-        return f"{self.network} FTP"
 
 
 class FTPVariableMapping(Orderable):
     network_ftp = ParentalKey(NetworkFTP, on_delete=models.CASCADE, related_name="variable_mappings")
+    adl_parameter = models.ForeignKey(DataParameter, on_delete=models.CASCADE, verbose_name=_("ADL Parameter"))
     file_variable_name = models.CharField(max_length=255, verbose_name=_("File Variable Name"))
-    file_variable_units = models.CharField(max_length=255, verbose_name=_("File Variable Units"))
-    adl_parameter = models.ForeignKey(DataParameter, on_delete=models.CASCADE, verbose_name=_("ADL Variable"))
+    file_variable_unit = models.ForeignKey(Unit, on_delete=models.CASCADE, verbose_name=_("File Variable Unit"))
     
     panels = [
         FieldPanel("adl_parameter"),
         FieldPanel("file_variable_name"),
-        FieldPanel("file_variable_units"),
+        FieldPanel("file_variable_unit"),
     ]
 
 

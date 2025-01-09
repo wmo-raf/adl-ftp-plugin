@@ -60,12 +60,15 @@ class AdlFtpPlugin(Plugin):
             self.variable_mappings = variable_mappings
             
             if self.network_ftp:
-                logger.info(f"[ADL_FTP_PLUGIN] Getting data from FTP network {self.network_ftp.network.name}")
-                
+                logger.info(
+                    f"[ADL_FTP_PLUGIN] Starting Processing FTP data for network {self.network_ftp.network.name}")
                 # Create FTP client
-                self.ftp = FTPClient(host=self.network_ftp.host, port=self.network_ftp.port,
-                                     user=self.network_ftp.username,
-                                     password=self.network_ftp.password)
+                self.ftp = FTPClient(
+                    host=self.network_ftp.host,
+                    port=self.network_ftp.port,
+                    user=self.network_ftp.username,
+                    password=self.network_ftp.password
+                )
                 
                 station_links = self.network_ftp.station_links.all()
                 
@@ -76,8 +79,9 @@ class AdlFtpPlugin(Plugin):
                 self.ftp.close()
     
     def process_station_link(self, station_link):
-        logger.info(f"[ADL_FTP_PLUGIN] Getting data for station {station_link.station.name}")
+        net_ftp_name = self.network_ftp.network.name
         timezone_info = station_link.timezone
+        station_name = station_link.station.name
         
         path = station_link.ftp_path
         
@@ -96,6 +100,9 @@ class AdlFtpPlugin(Plugin):
         
         # Process each path
         for path in paths:
+            logger.info(f"[ADL_FTP_PLUGIN] Getting FTP data from '{net_ftp_name}' for station '{station_name}' "
+                        f"from FTP path '{path}'")
+            
             # check if the path exists
             if not self.ftp.cd(path):
                 logger.warning(f"[ADL_FTP_PLUGIN] Path {path} not found")
@@ -119,7 +126,7 @@ class AdlFtpPlugin(Plugin):
                         f"pattern {pattern} in path {path}")
         else:
             logger.info(
-                f"[ADL_FTP_PLUGIN] Found {len(matching_files)} matching files for station {station.name}")
+                f"[ADL_FTP_PLUGIN] Found {len(matching_files)} matching files for station {station.name} in path {path}")
         
         # Process each file
         for file in matching_files:
@@ -179,34 +186,30 @@ class AdlFtpPlugin(Plugin):
             for variable_mapping in variable_mappings:
                 adl_parameter = variable_mapping.adl_parameter
                 file_variable_name = variable_mapping.file_variable_name
-                file_variable_units = variable_mapping.file_variable_units
+                file_variable_unit = variable_mapping.file_variable_unit
                 
                 value = record.get(file_variable_name)
                 
-                if value is not None:
-                    try:
-                        value = adl_parameter.convert_value_units(value, file_variable_units)
-                        
-                        record_data = {
-                            "station": station,
-                            "parameter": adl_parameter,
-                            "time": utc_obs_date,
-                            "value": value,
-                            "connection": station_link.network_connection,
-                        }
-                        
-                        param_obs_record = ObservationRecord(**record_data)
-                        file_obs_records.append(param_obs_record)
-                    except Exception as e:
-                        logger.error(f"[ADL_FTP_PLUGIN] Error converting value for parameter "
-                                     f"{adl_parameter.parameter}: {e}")
-                else:
-                    logger.info(
-                        f"[ADL_FTP_PLUGIN] No data recorded for parameter {adl_parameter.parameter} ")
+                if value is None:
+                    logger.warning(f"[ADL_FTP_PLUGIN] No data record found for parameter {adl_parameter.name}")
+                    continue
+                
+                if adl_parameter.unit != file_variable_unit:
+                    value = adl_parameter.convert_value_units(value, file_variable_unit)
+                
+                record_data = {
+                    "station": station,
+                    "parameter": adl_parameter,
+                    "time": utc_obs_date,
+                    "value": value,
+                    "connection": station_link.network_connection,
+                }
+                
+                param_obs_record = ObservationRecord(**record_data)
+                file_obs_records.append(param_obs_record)
         
         if file_obs_records:
-            logger.info(
-                f"[ADL_FTP_PLUGIN] Saving {len(file_obs_records)} parameter records for station {station.name}")
+            logger.info(f"[ADL_FTP_PLUGIN] Saving {len(file_obs_records)} parameter records for station {station.name}")
             ObservationRecord.objects.bulk_create(file_obs_records, ignore_conflicts=True)
             
             # Mark the db data file as processed
