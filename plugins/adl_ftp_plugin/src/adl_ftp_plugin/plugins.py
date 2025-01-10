@@ -203,6 +203,7 @@ class AdlFtpPlugin(Plugin):
                     "time": utc_obs_date,
                     "value": value,
                     "connection": station_link.network_connection,
+                    "is_daily": station_link.network_connection.is_daily_data,
                 }
                 
                 param_obs_record = ObservationRecord(**record_data)

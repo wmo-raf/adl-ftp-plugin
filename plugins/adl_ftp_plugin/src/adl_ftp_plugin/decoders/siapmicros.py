@@ -166,6 +166,7 @@ class SiapMicrosDecoder(FTPDecoder):
         with open(file_path, "r", encoding="UTF-8") as f_in:
             reader = csv_reader(line.replace('\0', '') for line in f_in)
             
+            # parse line by line
             for line in reader:
                 check_field = line[len(line) - 1]
                 if not check_field.startswith("#"):
@@ -174,9 +175,9 @@ class SiapMicrosDecoder(FTPDecoder):
                 # check count
                 count = int(check_field[1:])
                 if not len(line) == count:
-                    raise ValueError(
-                        "The count does not match the number of fields. Expected: {0}, Actual: {1}".format(count,
-                                                                                                           len(line)))
+                    raise ValueError("The count does not match the number of fields. "
+                                     "Expected: {0}, Actual: {1}".format(count, len(line))
+                                     )
                 
                 # station id
                 station_id = line[0]
@@ -199,8 +200,8 @@ class SiapMicrosDecoder(FTPDecoder):
                 
                 # check if the number of blocks is correct
                 if not len(blocks_units_data) == num_of_blocks:
-                    raise ValueError(
-                        f"The number of blocks data found :{len(blocks_units_data)} is not equal to the number of expected blocks: {num_of_blocks}")
+                    raise ValueError(f"The number of blocks data found :{len(blocks_units_data)} is not "
+                                     f"equal to the number of expected blocks: {num_of_blocks}")
                 
                 params_data = {
                     "station_id": station_id,
