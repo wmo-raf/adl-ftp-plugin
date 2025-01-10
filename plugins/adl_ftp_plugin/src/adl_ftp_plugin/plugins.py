@@ -195,7 +195,7 @@ class AdlFtpPlugin(Plugin):
                     continue
                 
                 if adl_parameter.unit != file_variable_unit:
-                    value = adl_parameter.convert_value_units(value, file_variable_unit)
+                    value = adl_parameter.convert_value_from_units(value, file_variable_unit)
                 
                 record_data = {
                     "station": station,
