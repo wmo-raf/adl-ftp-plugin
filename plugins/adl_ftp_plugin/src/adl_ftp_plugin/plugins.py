@@ -211,7 +211,12 @@ class AdlFtpPlugin(Plugin):
         
         if file_obs_records:
             logger.info(f"[ADL_FTP_PLUGIN] Saving {len(file_obs_records)} parameter records for station {station.name}")
-            ObservationRecord.objects.bulk_create(file_obs_records, update_conflicts=True, update_fields=["value"])
+            ObservationRecord.objects.bulk_create(
+                file_obs_records,
+                update_conflicts=True,
+                update_fields=["value"],
+                unique_fields=["station", "parameter", "time", "connection"]
+            )
             
             # Mark the db data file as processed
             db_data_file.processed = True
