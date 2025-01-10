@@ -222,7 +222,9 @@ class SiapMicrosDecoder(FTPDecoder):
                     except ValueError:
                         value = None
                     
-                    params_data[param_id] = value
+                    param_data_id = f"{param_id}_{value_type}"
+                    
+                    params_data[param_data_id] = value
                 
                 data.get("values").append(params_data)
         
