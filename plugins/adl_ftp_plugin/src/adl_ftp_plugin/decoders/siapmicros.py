@@ -13,7 +13,7 @@ VALUE_TYPES = {
 
 class SiapMicrosDecoder(FTPDecoder):
     """
-    This class represents a decoder for the TOA5 data format.
+    This class represents a decoder for the SIAP+Micros data format.
     """
     
     type = "siapmicros"
