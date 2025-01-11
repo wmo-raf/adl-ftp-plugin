@@ -7,6 +7,7 @@ from ..registries import FTPDecoder
 class Toa5Decoder(FTPDecoder):
     """
     This class represents a decoder for the TOA5 data format.
+    Mostly used by Campbell Scientific dataloggers.
     """
     
     type = "toa5"
