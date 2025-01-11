@@ -47,11 +47,11 @@ def add_date_info_to_path(path, date_info):
     parts = [str(year)]
     
     if year:
-        if month:
+        if month is not None:
             parts.append(f"{int(month):02}")
-            if day:
+            if day is not None:
                 parts.append(f"{int(day):02}")
-                if hour:
+                if hour is not None:
                     parts.append(f"{int(hour):02}")
     
     # Join the path and the parts

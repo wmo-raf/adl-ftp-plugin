@@ -89,10 +89,13 @@ class AdlFtpPlugin(Plugin):
         if station_link.dir_structured_by_date and station_link.date_granularity:
             date_granularity = station_link.date_granularity
             
+            start_date = dj_timezone.localtime()
+            
+            # use the start date if set
             if station_link.start_date:
-                dates = get_dates_to_now(date_granularity, timezone_info, station_link.start_date)
-            else:
-                dates = get_dates_to_now(date_granularity, timezone_info, dj_timezone.now())
+                start_date = station_link.start_date
+            
+            dates = get_dates_to_now(date_granularity=date_granularity, timezone=timezone_info, from_date=start_date)
             
             paths = get_date_paths(path, dates, date_granularity)
         else:
