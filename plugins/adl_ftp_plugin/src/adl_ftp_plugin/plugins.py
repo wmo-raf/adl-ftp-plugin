@@ -72,8 +72,15 @@ class AdlFtpPlugin(Plugin):
                 
                 station_links = self.network_ftp.station_links.all()
                 
+                logger.debug(f"[ADL_FTP_PLUGIN] Found {len(station_links)} station links "
+                             f"for network {self.network_ftp.network.name}")
+                
                 for station_link in station_links:
+                    logger.debug(f"[ADL_FTP_PLUGIN] Processing station link {station_link.station.name}")
                     self.process_station_link(station_link)
+                
+                logger.info(f"[ADL_FTP_PLUGIN] Finished Processing FTP data for "
+                            f"network {self.network_ftp.network.name}")
                 
                 # close the connection
                 self.ftp.close()
@@ -103,8 +110,8 @@ class AdlFtpPlugin(Plugin):
         
         # Process each path
         for path in paths:
-            logger.info(f"[ADL_FTP_PLUGIN] Getting FTP data from '{net_ftp_name}' for station '{station_name}' "
-                        f"from FTP path '{path}'")
+            logger.debug(f"[ADL_FTP_PLUGIN] Getting FTP data from '{net_ftp_name}' for station '{station_name}' "
+                         f"from FTP path '{path}'")
             
             # check if the path exists
             if not self.ftp.cd(path):
@@ -116,7 +123,7 @@ class AdlFtpPlugin(Plugin):
     def process_path(self, station_link, path):
         station = station_link.station
         
-        logger.info(f"[ADL_FTP_PLUGIN] Getting list of files in path {path}")
+        logger.debug(f"[ADL_FTP_PLUGIN] Getting list of files in path {path}")
         files = self.ftp.list(path, extra=True)
         pattern = station_link.file_pattern
         
@@ -125,10 +132,10 @@ class AdlFtpPlugin(Plugin):
         
         # If no files found, log and continue
         if not matching_files:
-            logger.info(f"[ADL_FTP_PLUGIN] No files found for station {station.name} matching "
-                        f"pattern {pattern} in path {path}")
+            logger.debug(f"[ADL_FTP_PLUGIN] No files found for station {station.name} matching "
+                         f"pattern {pattern} in path {path}")
         else:
-            logger.info(
+            logger.debug(
                 f"[ADL_FTP_PLUGIN] Found {len(matching_files)} matching files for station {station.name} in path {path}")
         
         # Process each file
@@ -140,13 +147,13 @@ class AdlFtpPlugin(Plugin):
                                                              file_name=file_name).first()
             
             if db_data_file and station_link.skip_already_downloaded_files:
-                logger.info(f"[ADL_FTP_PLUGIN] File {file_name} already downloaded")
+                logger.debug(f"[ADL_FTP_PLUGIN] File {file_name} already downloaded")
             
             if not db_data_file or not station_link.skip_already_downloaded_files:
                 remote_file_path = normalize_path(f"{path}/{file_name}")
                 
                 with tempfile.NamedTemporaryFile(suffix=file_name) as temp_file:
-                    logger.info(f"[ADL_FTP_PLUGIN] Downloading file {file_name}..")
+                    logger.debug(f"[ADL_FTP_PLUGIN] Downloading file {file_name}..")
                     self.ftp.get(remote_file_path, temp_file.name)
                     
                     db_data_file = FTPStationDataFile(
@@ -156,10 +163,10 @@ class AdlFtpPlugin(Plugin):
                     
                     db_data_file.file.save(file_name, temp_file)
             
-            logger.info(f"[ADL_FTP_PLUGIN] Processing file {file_name}")
+            logger.debug(f"[ADL_FTP_PLUGIN] Processing file {file_name}")
             
             if db_data_file.processed and station_link.skip_already_processed_files:
-                logger.info(f"[ADL_FTP_PLUGIN] File {file_name} already processed. Skipping..")
+                logger.debug(f"[ADL_FTP_PLUGIN] File {file_name} already processed. Skipping..")
                 continue
             
             self.process_file(db_data_file, station_link, self.variable_mappings)
@@ -176,12 +183,12 @@ class AdlFtpPlugin(Plugin):
         file_obs_records = []
         
         for i, record in enumerate(data_values):
-            logger.info(f"[ADL_FTP_PLUGIN] Processing record {i + 1}/{record_count}")
+            logger.debug(f"[ADL_FTP_PLUGIN] Processing record {i + 1}/{record_count}")
             
             timestamp = record.get("TIMESTAMP")
             
             if not timestamp:
-                logger.warning(f"[ADL_FTP_PLUGIN] No timestamp found in record {record}")
+                logger.debug(f"[ADL_FTP_PLUGIN] No timestamp found in record {record}")
                 continue
             
             utc_obs_date = dj_timezone.make_aware(timestamp, timezone_info)
@@ -194,7 +201,7 @@ class AdlFtpPlugin(Plugin):
                 value = record.get(file_variable_name)
                 
                 if value is None:
-                    logger.warning(f"[ADL_FTP_PLUGIN] No data record found for parameter {adl_parameter.name}")
+                    logger.debug(f"[ADL_FTP_PLUGIN] No data record found for parameter {adl_parameter.name}")
                     continue
                 
                 if adl_parameter.unit != file_variable_unit:
@@ -213,7 +220,8 @@ class AdlFtpPlugin(Plugin):
                 file_obs_records.append(param_obs_record)
         
         if file_obs_records:
-            logger.info(f"[ADL_FTP_PLUGIN] Saving {len(file_obs_records)} parameter records for station {station.name}")
+            logger.debug(
+                f"[ADL_FTP_PLUGIN] Saving {len(file_obs_records)} parameter records for station {station.name}")
             ObservationRecord.objects.bulk_create(
                 file_obs_records,
                 update_conflicts=True,
