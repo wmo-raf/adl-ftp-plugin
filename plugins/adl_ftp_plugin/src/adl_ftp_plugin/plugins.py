@@ -62,13 +62,6 @@ class AdlFtpPlugin(Plugin):
             if self.network_ftp:
                 logger.info(
                     f"[ADL_FTP_PLUGIN] Starting Processing FTP data for network {self.network_ftp.network.name}")
-                # Create FTP client
-                self.ftp = FTPClient(
-                    host=self.network_ftp.host,
-                    port=self.network_ftp.port,
-                    user=self.network_ftp.username,
-                    password=self.network_ftp.password
-                )
                 
                 station_links = self.network_ftp.station_links.all()
                 
@@ -77,13 +70,22 @@ class AdlFtpPlugin(Plugin):
                 
                 for station_link in station_links:
                     logger.debug(f"[ADL_FTP_PLUGIN] Processing station link {station_link.station.name}")
+                    
+                    # Create FTP client
+                    self.ftp = FTPClient(
+                        host=self.network_ftp.host,
+                        port=self.network_ftp.port,
+                        user=self.network_ftp.username,
+                        password=self.network_ftp.password
+                    )
+                    
                     self.process_station_link(station_link)
+                    
+                    # close the connection
+                    self.ftp.close()
                 
                 logger.info(f"[ADL_FTP_PLUGIN] Finished Processing FTP data for "
                             f"network {self.network_ftp.network.name}")
-                
-                # close the connection
-                self.ftp.close()
     
     def process_station_link(self, station_link):
         net_ftp_name = self.network_ftp.network.name
