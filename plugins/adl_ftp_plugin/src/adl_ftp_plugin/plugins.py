@@ -22,7 +22,7 @@ class AdlFtpPlugin(Plugin):
     type = "adl_ftp_plugin"
     label = "ADL FTP Plugin"
     
-    network_ftp = None
+    network_conn_ftp = None
     decoder = None
     ftp = None
     variable_mappings = None
@@ -35,60 +35,74 @@ class AdlFtpPlugin(Plugin):
         return ftp_decoder_registry.get(decoder_name)
     
     def run_process(self, network_connection):
-        self.network_ftp = network_connection
+        self.network_conn_ftp = network_connection
         return super().run_process(network_connection)
     
     def get_data(self):
-        if self.network_ftp:
-            decoder_name = self.network_ftp.decoder
-            decoder = self.get_decoder(decoder_name)
+        if not self.network_conn_ftp:
+            logger.error("[ADL_FTP_PLUGIN] Network Connection not set. Skipping...")
+            return
+        
+        network_conn_name = self.network_conn_ftp.name
+        decoder_name = self.network_conn_ftp.decoder
+        decoder = self.get_decoder(decoder_name)
+        
+        if not decoder:
+            logger.error(f"[ADL_FTP_PLUGIN] Decoder {decoder_name} not found in decoder registry.")
+            return
+        
+        # found decoder
+        self.decoder = decoder
+        
+        variable_mappings = self.network_conn_ftp.variable_mappings.all()
+        
+        if not variable_mappings:
+            logger.warning(
+                f"[ADL_FTP_PLUGIN] No variable mappings found for network {network_conn_name}. Skipping...")
+            return
+        
+        self.variable_mappings = variable_mappings
+        
+        logger.info(
+            f"[ADL_FTP_PLUGIN] Starting Processing FTP data for network {network_conn_name}"
+        )
+        
+        station_links = self.network_conn_ftp.station_links.all()
+        
+        logger.debug(
+            f"[ADL_FTP_PLUGIN] Found {len(station_links)} station links for network connection {network_conn_name}"
+        )
+        
+        records_count = 0
+        
+        for station_link in station_links:
+            logger.debug(f"[ADL_FTP_PLUGIN] Processing station link {station_link.station.name}")
             
-            if not decoder:
-                logger.error(f"[ADL_FTP_PLUGIN] Decoder {decoder_name} not found in decoder registry.")
-                return
+            # Create FTP client
+            self.ftp = FTPClient(
+                host=self.network_conn_ftp.host,
+                port=self.network_conn_ftp.port,
+                user=self.network_conn_ftp.username,
+                password=self.network_conn_ftp.password
+            )
             
-            # found decoder
-            self.decoder = decoder
+            station_link_records_count = self.process_station_link(station_link)
             
-            variable_mappings = self.network_ftp.variable_mappings.all()
+            records_count += station_link_records_count
             
-            if not variable_mappings:
-                logger.warning(
-                    f"[ADL_FTP_PLUGIN] No variable mappings found for network {self.network_ftp.network.name}. Skipping...")
-                return
-            
-            self.variable_mappings = variable_mappings
-            
-            if self.network_ftp:
-                logger.info(
-                    f"[ADL_FTP_PLUGIN] Starting Processing FTP data for network {self.network_ftp.network.name}")
-                
-                station_links = self.network_ftp.station_links.all()
-                
-                logger.debug(f"[ADL_FTP_PLUGIN] Found {len(station_links)} station links "
-                             f"for network {self.network_ftp.network.name}")
-                
-                for station_link in station_links:
-                    logger.debug(f"[ADL_FTP_PLUGIN] Processing station link {station_link.station.name}")
-                    
-                    # Create FTP client
-                    self.ftp = FTPClient(
-                        host=self.network_ftp.host,
-                        port=self.network_ftp.port,
-                        user=self.network_ftp.username,
-                        password=self.network_ftp.password
-                    )
-                    
-                    self.process_station_link(station_link)
-                    
-                    # close the connection
-                    self.ftp.close()
-                
-                logger.info(f"[ADL_FTP_PLUGIN] Finished Processing FTP data for "
-                            f"network {self.network_ftp.network.name}")
+            # close the connection
+            self.ftp.close()
+        
+        logger.debug(
+            f"[ADL_FTP_PLUGIN] Processed {records_count} records for network connection {network_conn_name}"
+        )
+        
+        logger.info(f"[ADL_FTP_PLUGIN] Finished Processing FTP data for network connection {network_conn_name}")
+        
+        return records_count
     
     def process_station_link(self, station_link):
-        net_ftp_name = self.network_ftp.network.name
+        net_ftp_name = self.network_conn_ftp.network.name
         timezone_info = station_link.timezone
         station_name = station_link.station.name
         
@@ -110,17 +124,22 @@ class AdlFtpPlugin(Plugin):
         else:
             paths = [path]
         
+        records_count = 0
         # Process each path
         for path in paths:
-            logger.debug(f"[ADL_FTP_PLUGIN] Getting FTP data from '{net_ftp_name}' for station '{station_name}' "
-                         f"from FTP path '{path}'")
+            logger.debug(
+                f"[ADL_FTP_PLUGIN] Getting FTP data from '{net_ftp_name}' for station '{station_name}' from FTP path '{path}'"
+            )
             
             # check if the path exists
             if not self.ftp.cd(path):
                 logger.warning(f"[ADL_FTP_PLUGIN] Path {path} not found")
                 continue
             
-            self.process_path(station_link, path)
+            path_records_count = self.process_path(station_link, path)
+            records_count += path_records_count
+        
+        return records_count
     
     def process_path(self, station_link, path):
         station = station_link.station
@@ -140,6 +159,7 @@ class AdlFtpPlugin(Plugin):
             logger.debug(
                 f"[ADL_FTP_PLUGIN] Found {len(matching_files)} matching files for station {station.name} in path {path}")
         
+        records_count = 0
         # Process each file
         for file in matching_files:
             file_name = file["name"]
@@ -171,7 +191,11 @@ class AdlFtpPlugin(Plugin):
                 logger.debug(f"[ADL_FTP_PLUGIN] File {file_name} already processed. Skipping..")
                 continue
             
-            self.process_file(db_data_file, station_link, self.variable_mappings)
+            file_records_count = self.process_file(db_data_file, station_link, self.variable_mappings)
+            
+            records_count += file_records_count
+        
+        return records_count
     
     def process_file(self, db_data_file, station_link, variable_mappings):
         timezone_info = station_link.timezone
@@ -218,12 +242,13 @@ class AdlFtpPlugin(Plugin):
                     "is_daily": station_link.network_connection.is_daily_data,
                 }
                 
-                param_obs_record = ObservationRecord(**record_data)
+                param_obs_record = 4(**record_data)
                 file_obs_records.append(param_obs_record)
         
+        records_count = len(file_obs_records)
+        
         if file_obs_records:
-            logger.debug(
-                f"[ADL_FTP_PLUGIN] Saving {len(file_obs_records)} parameter records for station {station.name}")
+            logger.debug(f"[ADL_FTP_PLUGIN] Saving {records_count} parameter records for station {station.name}")
             ObservationRecord.objects.bulk_create(
                 file_obs_records,
                 update_conflicts=True,
@@ -234,3 +259,5 @@ class AdlFtpPlugin(Plugin):
             # Mark the db data file as processed
             db_data_file.processed = True
             db_data_file.save()
+        
+        return records_count
