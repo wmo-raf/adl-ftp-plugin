@@ -242,7 +242,7 @@ class AdlFtpPlugin(Plugin):
                     "is_daily": station_link.network_connection.is_daily_data,
                 }
                 
-                param_obs_record = 4(**record_data)
+                param_obs_record = ObservationRecord(**record_data)
                 file_obs_records.append(param_obs_record)
         
         records_count = len(file_obs_records)
