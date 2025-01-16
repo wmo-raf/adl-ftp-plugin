@@ -101,7 +101,7 @@ class FTPStationLink(StationLink):
             FieldPanel("skip_already_downloaded_files"),
             FieldPanel("skip_already_processed_files"),
         ], heading=_("Data Collection")),
-    ]
+    ] + StationLink.aggregation_panels
     
     class Meta:
         verbose_name = _("FTP Station Link")
