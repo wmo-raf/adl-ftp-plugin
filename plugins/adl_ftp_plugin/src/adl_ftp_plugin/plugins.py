@@ -76,7 +76,13 @@ class AdlFtpPlugin(Plugin):
         records_count = 0
         
         for station_link in station_links:
-            logger.debug(f"[ADL_FTP_PLUGIN] Processing station link {station_link.station.name}")
+            station_name = station_link.station.name
+            
+            if not station_link.enabled:
+                logger.debug(f"[ADL_FTP_PLUGIN] Station link {station_name} is not enabled. Skipping..")
+                continue
+            
+            logger.debug(f"[ADL_FTP_PLUGIN] Processing station link {station_name}")
             
             # Create FTP client
             self.ftp = FTPClient(
