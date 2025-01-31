@@ -73,7 +73,7 @@ class AdlFtpPlugin(Plugin):
             f"[ADL_FTP_PLUGIN] Found {len(station_links)} station links for network connection {network_conn_name}"
         )
         
-        records_count = 0
+        stations_records_count = {}
         
         for station_link in station_links:
             station_name = station_link.station.name
@@ -94,18 +94,14 @@ class AdlFtpPlugin(Plugin):
             
             station_link_records_count = self.process_station_link(station_link)
             
-            records_count += station_link_records_count
+            stations_records_count[station_link.station.id] = station_link_records_count
             
             # close the connection
             self.ftp.close()
         
-        logger.debug(
-            f"[ADL_FTP_PLUGIN] Processed {records_count} records for network connection {network_conn_name}"
-        )
-        
         logger.info(f"[ADL_FTP_PLUGIN] Finished Processing FTP data for network connection {network_conn_name}")
         
-        return records_count
+        return stations_records_count
     
     def process_station_link(self, station_link):
         net_ftp_name = self.network_conn_ftp.network.name
