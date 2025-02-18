@@ -2,6 +2,7 @@ import fnmatch
 import logging
 import tempfile
 
+import pandas as pd
 from adl.core.models import ObservationRecord
 from adl.core.registries import Plugin
 from django.utils import timezone as dj_timezone
@@ -228,7 +229,8 @@ class AdlFtpPlugin(Plugin):
                 
                 value = record.get(file_variable_name)
                 
-                if value is None:
+                # is None or nan
+                if value is None or pd.isna(value):
                     logger.debug(f"[ADL_FTP_PLUGIN] No data record found for parameter {adl_parameter.name}")
                     continue
                 

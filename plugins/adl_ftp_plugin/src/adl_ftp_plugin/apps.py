@@ -1,5 +1,5 @@
-from django.apps import AppConfig
 from adl.core.registries import plugin_registry
+from django.apps import AppConfig
 
 from .registries import ftp_decoder_registry
 

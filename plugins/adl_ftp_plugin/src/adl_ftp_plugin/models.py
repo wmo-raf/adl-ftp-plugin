@@ -50,6 +50,8 @@ class FTPVariableMapping(Orderable):
 
 
 class FTPStationLink(StationLink):
+    extra_list_display = ["ftp_path", "file_pattern", ]
+    
     DATE_GRANULARITY_CHOICES = [
         ("year", _("Year")),
         ("month", _("Month")),
@@ -108,7 +110,7 @@ class FTPStationLink(StationLink):
         verbose_name_plural = _("FTP Station Links")
     
     def __str__(self):
-        return f"{self.network_connection} - {self.station}"
+        return f"{self.network_connection} - {self.station.wigos_id} - {self.station}"
 
 
 def get_ftp_data_file_upload_path(instance, filename):
