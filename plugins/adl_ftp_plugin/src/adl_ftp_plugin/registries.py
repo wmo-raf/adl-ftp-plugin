@@ -1,4 +1,7 @@
+import fnmatch
+
 from django.core.exceptions import ImproperlyConfigured
+
 from adl.core.registry import Registry, Instance
 
 
@@ -34,6 +37,24 @@ class FTPDecoder(Instance):
         :rtype: list[dict]
         """
         raise NotImplementedError
+    
+    def get_matching_files(self, station_link, files):
+        """
+        Returns a list of files that match the decoder.
+
+        :param station_link: The station link that is used to collect the data.
+        :type station_link: adl_ftp_plugin.models.FTPStationLink
+        :param files: The list of files that should be checked.
+        :type files: list[str]
+        :return: The list of matching files.
+        :rtype: list[str]
+        """
+        pattern = station_link.file_pattern
+        
+        # Filter files by pattern
+        matching_files = [file for file in files if fnmatch.fnmatch(file, pattern)]
+        
+        return matching_files
 
 
 class FTPDecoderRegistry(Registry):

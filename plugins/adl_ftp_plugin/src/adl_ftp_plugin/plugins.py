@@ -151,8 +151,7 @@ class AdlFtpPlugin(Plugin):
         files = self.ftp.list(path, extra=True)
         pattern = station_link.file_pattern
         
-        # Filter files by pattern
-        matching_files = [file for file in files if fnmatch.fnmatch(file["name"], pattern)]
+        matching_files = self.decoder.get_matching_files(station_link, files)
         
         # If no files found, log and continue
         if not matching_files:

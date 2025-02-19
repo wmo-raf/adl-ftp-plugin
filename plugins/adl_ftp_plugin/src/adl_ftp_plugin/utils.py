@@ -58,9 +58,12 @@ def add_date_info_to_path(path, date_info):
     return os.path.join(path, *filter(None, parts))
 
 
-def get_dates_to_now(date_granularity, timezone=None, from_date=None):
+def get_dates_to_now(date_granularity=None, timezone=None, from_date=None, as_string=False, str_format=None):
     if from_date is None:
         from_date = dj_timezone.now()
+    
+    if date_granularity is None:
+        date_granularity = "day"
     
     # Ensure correct timezone handling
     now = dj_timezone.localtime(dj_timezone.now(), timezone)
@@ -69,11 +72,15 @@ def get_dates_to_now(date_granularity, timezone=None, from_date=None):
     if start_date > now:
         raise ValueError("from_date cannot be in the future")
     
-    date_paths = []
+    dates_list = []
     current_date = start_date
     
     while current_date <= now:
-        date_paths.append(current_date)
+        if as_string and str_format:
+            dates_list.append(current_date.strftime(str_format))
+        else:
+            dates_list.append(current_date)
+        
         if date_granularity == "year":
             current_date += relativedelta(years=1)
         elif date_granularity == "month":
@@ -85,7 +92,7 @@ def get_dates_to_now(date_granularity, timezone=None, from_date=None):
         else:
             raise ValueError("Invalid date granularity. Choose 'year', 'month', 'day', or 'hour'.")
     
-    return date_paths
+    return dates_list
 
 
 def get_date_paths(root_path, dates, date_granularity, ):
