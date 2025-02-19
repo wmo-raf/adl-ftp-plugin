@@ -148,10 +148,14 @@ class AdlFtpPlugin(Plugin):
         station = station_link.station
         
         logger.debug(f"[ADL_FTP_PLUGIN] Getting list of files in path {path}")
-        files = self.ftp.list(path, extra=True)
+        ftp_files_list = self.ftp.list(path, extra=True)
         pattern = station_link.file_pattern
         
-        matching_files = self.decoder.get_matching_files(station_link, files)
+        # get the list of files
+        files_list = [file["name"] for file in ftp_files_list]
+        
+        # get the matching files
+        matching_files = self.decoder.get_matching_files(station_link, files_list)
         
         # If no files found, log and continue
         if not matching_files:
@@ -163,8 +167,7 @@ class AdlFtpPlugin(Plugin):
         
         records_count = 0
         # Process each file
-        for file in matching_files:
-            file_name = file["name"]
+        for file_name in matching_files:
             
             # Check if this file was already downloaded
             db_data_file = FTPStationDataFile.objects.filter(station_link=station_link,
