@@ -50,7 +50,7 @@ class FTPVariableMapping(Orderable):
 
 
 class FTPStationLink(StationLink):
-    extra_list_display = ["ftp_path", "file_pattern", ]
+    extra_list_display = ["ftp_path", "file_pattern", "start_date"]
     
     DATE_GRANULARITY_CHOICES = [
         ("year", _("Year")),
@@ -75,9 +75,9 @@ class FTPStationLink(StationLink):
                              help_text=_("Timezone used by the station for recording observations"))
     
     start_date = models.DateTimeField(blank=True, null=True, validators=[validate_start_date],
-                                      verbose_name=_("Start Date for Data Collection"),
-                                      help_text=_("Select a past date to include the historical data. "
-                                                  "Leave blank for collecting realtime data only"), )
+                                      verbose_name=_("Start Date"),
+                                      help_text=_("Start date for data pulling. Select a past date to include the "
+                                                  "historical data. Leave blank for collecting realtime data only"), )
     skip_already_downloaded_files = models.BooleanField(default=True,
                                                         verbose_name=_("Skip downloading already downloaded files"),
                                                         help_text=_(
