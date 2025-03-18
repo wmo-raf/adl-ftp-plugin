@@ -106,7 +106,7 @@ class Toa5Decoder(FTPDecoder):
         :rtype: list
         """
         
-        data = []
+        data_dict = {}  # Use a dictionary to handle duplicates
         
         for line in data_lines:
             line_data = {}
@@ -117,10 +117,16 @@ class Toa5Decoder(FTPDecoder):
                     continue
                 
                 if column == 'TIMESTAMP':
-                    line_data[column] = datetime.strptime(val, "%Y-%m-%d %H:%M:%S")
+                    timestamp = datetime.strptime(val, "%Y-%m-%d %H:%M:%S")
+                    line_data[column] = timestamp
                 else:
                     line_data[column] = float(val)
             
-            data.append(line_data)
+            # If the timestamp already exists, update the entry with the current values
+            if 'TIMESTAMP' in line_data:
+                data_dict[line_data['TIMESTAMP']] = line_data
+        
+        # Convert the dictionary back to a list
+        data = list(data_dict.values())
         
         return data
