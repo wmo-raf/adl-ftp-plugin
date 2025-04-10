@@ -59,6 +59,15 @@ class FTPStationLink(StationLink):
         ("hour", _("Hour")),
     ]
     
+    MONTH_FORMAT_CHOICES = [
+        ("m", _("Month, 2 digits with leading zeros. '01' to '12'")),
+        ("n", _("Month without leading zeros. '1' to '12'")),
+        ("M", _("Month, textual, 3 letters. 'Jan'")),
+        ("b", _("Month, textual, 3 letters, lowercase. 'jan'")),
+        ("F", _("Month, textual, full. 'January'")),
+        ("f", _("Month, textual, full, lowercase. 'january'")),
+    ]
+    
     ftp_path = models.CharField(max_length=255, verbose_name=_("FTP Path"),
                                 help_text=_("Path to the directory containing the data files"))
     file_pattern = models.CharField(max_length=255, verbose_name=_("File Pattern"))
@@ -71,6 +80,8 @@ class FTPStationLink(StationLink):
                                         verbose_name=_("Date Granularity"),
                                         help_text=_("How far down the date hierarchy is the file located ? "
                                                     "This will be used to construct the final name of the folder in the FTP path"))
+    month_dir_format = models.CharField(max_length=255, blank=True, null=True, choices=MONTH_FORMAT_CHOICES,
+                                        default="m", verbose_name=_("Month directory Format"), )
     timezone = TimeZoneField(default='UTC', verbose_name=_("Station Timezone"),
                              help_text=_("Timezone used by the station for recording observations"))
     
@@ -95,6 +106,7 @@ class FTPStationLink(StationLink):
         MultiFieldPanel([
             FieldPanel("dir_structured_by_date"),
             FieldPanel("date_granularity"),
+            FieldPanel("month_dir_format"),
             FieldPanel("timezone"),
         ], heading=_("File Structure")),
         

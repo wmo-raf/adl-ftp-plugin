@@ -1,4 +1,3 @@
-import fnmatch
 import logging
 import tempfile
 
@@ -114,6 +113,7 @@ class AdlFtpPlugin(Plugin):
         # Add date info to path if structured by date
         if station_link.dir_structured_by_date and station_link.date_granularity:
             date_granularity = station_link.date_granularity
+            month_dir_format = station_link.month_dir_format
             
             start_date = dj_timezone.localtime()
             
@@ -123,7 +123,7 @@ class AdlFtpPlugin(Plugin):
             
             dates = get_dates_to_now(date_granularity=date_granularity, timezone=timezone_info, from_date=start_date)
             
-            paths = get_date_paths(path, dates, date_granularity)
+            paths = get_date_paths(path, dates, date_granularity, month_dir_format)
         else:
             paths = [path]
         

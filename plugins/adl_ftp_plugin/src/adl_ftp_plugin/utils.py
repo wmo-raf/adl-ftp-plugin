@@ -1,3 +1,4 @@
+import calendar
 import os
 
 from dateutil.relativedelta import relativedelta
@@ -36,7 +37,10 @@ def normalize_path(path):
     return path
 
 
-def add_date_info_to_path(path, date_info):
+def add_date_info_to_path(path, date_info, month_dir_format=None):
+    if month_dir_format is None:
+        month_dir_format = "m"
+    
     # Extract year, month, and day from the date_info dictionary
     year = str(date_info.get("year")) if date_info.get("year") else None
     month = date_info.get("month")
@@ -48,7 +52,9 @@ def add_date_info_to_path(path, date_info):
     
     if year:
         if month is not None:
-            parts.append(f"{int(month):02}")
+            month = int(month)
+            month_dir = get_month_dir_formatted(month, month_dir_format)
+            parts.append(month_dir)
             if day is not None:
                 parts.append(f"{int(day):02}")
                 if hour is not None:
@@ -95,7 +101,7 @@ def get_dates_to_now(date_granularity=None, timezone=None, from_date=None, as_st
     return dates_list
 
 
-def get_date_paths(root_path, dates, date_granularity, ):
+def get_date_paths(root_path, dates, date_granularity, month_dir_format=None):
     paths = []
     
     for date in dates:
@@ -114,8 +120,40 @@ def get_date_paths(root_path, dates, date_granularity, ):
         elif date_granularity == "hour":
             date_info.update({"year": year, "month": month, "day": day, "hour": date.hour})
         
-        path = add_date_info_to_path(root_path, date_info)
+        path = add_date_info_to_path(root_path, date_info, month_dir_format)
         
         paths.append(path)
     
     return paths
+
+
+def get_month_dir_formatted(month_int, month_dir_format):
+    """
+    Returns a string representation of the month based on the given format.
+
+    Args:
+        month_int (int): The month number (1–12).
+        month_dir_format (str): The format code (e.g., "m", "n", "M", "b", "F", "f").
+
+    Returns:
+        str: The formatted month string.
+
+    Raises:
+        ValueError: If the month_int is out of range or format is invalid.
+    """
+    if not 1 <= month_int <= 12:
+        raise ValueError("month_int must be between 1 and 12")
+    
+    format_map = {
+        "m": f"{month_int:02d}",  # '01' to '12'
+        "n": str(month_int),  # '1' to '12'
+        "M": calendar.month_abbr[month_int],  # 'Jan'
+        "b": calendar.month_abbr[month_int].lower(),  # 'jan'
+        "F": calendar.month_name[month_int],  # 'January'
+        "f": calendar.month_name[month_int].lower(),  # 'january'
+    }
+    
+    if month_dir_format not in format_map:
+        raise ValueError(f"Unsupported month_dir_format: {month_dir_format}")
+    
+    return format_map[month_dir_format]
