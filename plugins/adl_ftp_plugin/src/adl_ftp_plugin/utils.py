@@ -157,3 +157,22 @@ def get_month_dir_formatted(month_int, month_dir_format):
         raise ValueError(f"Unsupported month_dir_format: {month_dir_format}")
     
     return format_map[month_dir_format]
+
+
+def resolve_variable_mappings(connection_variable_mappings, station_variable_mappings):
+    """
+      Resolves variable mappings from connection and station variable mappings.
+      Station mappings override connection mappings for the same parameter ID.
+  
+      :param connection_variable_mappings: List of mappings from the connection.
+      :param station_variable_mappings: List of mappings from the station (has higher priority).
+      :return: A dictionary mapping `adl_parameter_id` to the resolved VariableMapping.
+      """
+    
+    connection_variable_mappings = connection_variable_mappings or []
+    station_variable_mappings = station_variable_mappings or []
+    
+    resolved = {m.adl_parameter_id: m for m in connection_variable_mappings}
+    resolved.update({m.adl_parameter_id: m for m in station_variable_mappings})
+    
+    return resolved

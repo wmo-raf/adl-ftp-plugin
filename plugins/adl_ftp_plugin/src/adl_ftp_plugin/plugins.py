@@ -12,7 +12,8 @@ from .registries import ftp_decoder_registry
 from .utils import (
     normalize_path,
     get_dates_to_now,
-    get_date_paths
+    get_date_paths,
+    resolve_variable_mappings,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,6 @@ class AdlFtpPlugin(Plugin):
     network_conn_ftp = None
     decoder = None
     ftp = None
-    variable_mappings = None
     
     def get_urls(self):
         return []
@@ -53,15 +53,6 @@ class AdlFtpPlugin(Plugin):
         
         # found decoder
         self.decoder = decoder
-        
-        variable_mappings = self.network_conn_ftp.variable_mappings.all()
-        
-        if not variable_mappings:
-            logger.warning(
-                f"[ADL_FTP_PLUGIN] No variable mappings found for network {network_conn_name}. Skipping...")
-            return
-        
-        self.variable_mappings = variable_mappings
         
         logger.info(
             f"[ADL_FTP_PLUGIN] Starting Processing FTP data for network {network_conn_name}"
@@ -110,6 +101,18 @@ class AdlFtpPlugin(Plugin):
         
         path = station_link.ftp_path
         
+        # get the variable mappings from the station link
+        
+        conn_variable_mappings = self.network_conn_ftp.variable_mappings.all()
+        station_variable_mappings = station_link.variable_mappings.all()
+        
+        variable_mappings = resolve_variable_mappings(conn_variable_mappings, station_variable_mappings)
+        
+        # do not continue if no variable mappings from station link or connection are found
+        if not variable_mappings:
+            logger.warning(f"[ADL_FTP_PLUGIN] No variable mappings found for station {station_name}. Skipping..")
+            return 0
+        
         # Add date info to path if structured by date
         if station_link.dir_structured_by_date and station_link.date_granularity:
             date_granularity = station_link.date_granularity
@@ -139,12 +142,12 @@ class AdlFtpPlugin(Plugin):
                 logger.warning(f"[ADL_FTP_PLUGIN] Path {path} not found")
                 continue
             
-            path_records_count = self.process_path(station_link, path)
+            path_records_count = self.process_path(station_link, path, variable_mappings)
             records_count += path_records_count
         
         return records_count
     
-    def process_path(self, station_link, path):
+    def process_path(self, station_link, path, variable_mappings):
         station = station_link.station
         
         logger.debug(f"[ADL_FTP_PLUGIN] Getting list of files in path {path}")
@@ -196,7 +199,7 @@ class AdlFtpPlugin(Plugin):
                 logger.debug(f"[ADL_FTP_PLUGIN] File {file_name} already processed. Skipping..")
                 continue
             
-            file_records_count = self.process_file(db_data_file, station_link, self.variable_mappings)
+            file_records_count = self.process_file(db_data_file, station_link, variable_mappings)
             
             records_count += file_records_count
         
@@ -224,7 +227,7 @@ class AdlFtpPlugin(Plugin):
             
             utc_obs_date = dj_timezone.make_aware(timestamp, timezone_info)
             
-            for variable_mapping in variable_mappings:
+            for key, variable_mapping in variable_mappings.items():
                 adl_parameter = variable_mapping.adl_parameter
                 file_variable_name = variable_mapping.file_variable_name
                 file_variable_unit = variable_mapping.file_variable_unit

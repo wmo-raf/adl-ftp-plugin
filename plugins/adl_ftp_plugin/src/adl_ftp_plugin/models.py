@@ -115,6 +115,8 @@ class FTPStationLink(StationLink):
             FieldPanel("skip_already_downloaded_files"),
             FieldPanel("skip_already_processed_files"),
         ], heading=_("Data Collection")),
+        InlinePanel("variable_mappings", label=_("Variable Mapping"), heading=_("Variable Mappings"),
+                    help_text=_("Set the station specific variable mapping for the data files, if the general variable mapping in Connection does not apply for this station  ")),
     ] + StationLink.aggregation_panels
     
     class Meta:
@@ -123,6 +125,19 @@ class FTPStationLink(StationLink):
     
     def __str__(self):
         return f"{self.network_connection} - {self.station.wigos_id} - {self.station}"
+
+
+class FTPStationLinkVariableMapping(Orderable):
+    station_link = ParentalKey(FTPStationLink, on_delete=models.CASCADE, related_name="variable_mappings")
+    adl_parameter = models.ForeignKey(DataParameter, on_delete=models.CASCADE, verbose_name=_("ADL Parameter"))
+    file_variable_name = models.CharField(max_length=255, verbose_name=_("File Variable Name"))
+    file_variable_unit = models.ForeignKey(Unit, on_delete=models.CASCADE, verbose_name=_("File Variable Unit"))
+    
+    panels = [
+        FieldPanel("adl_parameter"),
+        FieldPanel("file_variable_name"),
+        FieldPanel("file_variable_unit"),
+    ]
 
 
 def get_ftp_data_file_upload_path(instance, filename):
