@@ -4,19 +4,21 @@
 # It is accessible at http://localhost .
 
 x-adl-variables: &adl-variables
-  DATABASE_URL: postgis://${WIS2BOX_ADL_DB_USER:-adl}:${WIS2BOX_ADL_DB_PASSWORD}@adl_db:5432/${WIS2BOX_ADL_DB_NAME:-adl}
+  DATABASE_URL: postgis://${ADL_DB_USER:-adl}:${ADL_DB_PASSWORD}@adl_db:5432/${ADL_DB_NAME:-adl}
   REDIS_URL: redis://adl_redis:6379/0
   PLUGIN_RUNTIME_SETUP_MARKER: 0
+  WAIT_TIMEOUT: 120
 
 services:
   adl_db:
     image: timescale/timescaledb-ha:pg15
+    container_name: adl-ftp-plugin-db
     env_file:
       - .env
     environment:
-      - POSTGRES_USER=${WIS2BOX_ADL_DB_USER:-adl}
-      - POSTGRES_DB=${WIS2BOX_ADL_DB_NAME:-adl}
-      - POSTGRES_PASSWORD=${WIS2BOX_ADL_DB_PASSWORD:-?}
+      - POSTGRES_USER=${ADL_DB_USER:-adl}
+      - POSTGRES_DB=${ADL_DB_NAME:-adl}
+      - POSTGRES_PASSWORD=${ADL_DB_PASSWORD:-?}
     ports:
       - "5432"
     volumes:
@@ -24,9 +26,11 @@ services:
 
   adl_redis:
     image: redis:alpine
+    container_name: adl-ftp-plugin-redis
 
   adl:
     image: adl-ftp-plugin_dev
+    container_name: adl-ftp-plugin
     build:
       context: .
       dockerfile: ./dev.Dockerfile
@@ -34,7 +38,7 @@ services:
         - PLUGIN_BUILD_UID=${PLUGIN_BUILD_UID}
         - PLUGIN_BUILD_GID=${PLUGIN_BUILD_GID}
     ports:
-      - "8000"
+      - "${PORT:-8080}:8000"
     env_file:
       - .env
     environment:
@@ -44,15 +48,14 @@ services:
       - adl_db
       - adl_redis
     volumes:
-      - static:/adl/app/src/adl/static
-      - media:/adl/app/src/adl/media
       - ./plugins/adl_ftp_plugin:/adl/plugins/adl_ftp_plugin
     # Open stdin and tty so when attaching key input works as expected.
-    stdin_open: true
-    tty: true
+    tty: true              # enables terminal support
+    stdin_open: true       # allows interactive input
 
   adl_celery_worker:
     image: adl-ftp-plugin_dev
+    container_name: adl-ftp-plugin-worker
     command: celery-worker
     env_file:
       - .env
@@ -62,15 +65,14 @@ services:
     depends_on:
       - adl
     volumes:
-      - static:/adl/app/src/adl/static
-      - media:/adl/app/src/adl/media
       - ./plugins/adl_ftp_plugin:/adl/plugins/adl_ftp_plugin
     # Open stdin and tty so when attaching key input works as expected.
-    stdin_open: true
-    tty: true
+    tty: true              # enables terminal support
+    stdin_open: true       # allows interactive input
 
   adl_celery_beat:
     image: adl-ftp-plugin_dev
+    container_name: adl-ftp-plugin-beat
     command: celery-beat
     env_file:
       - .env
@@ -80,25 +82,10 @@ services:
     depends_on:
       - adl
     volumes:
-      - static:/adl/app/src/adl/static
-      - media:/adl/app/src/adl/media
       - ./plugins/adl_ftp_plugin:/adl/plugins/adl_ftp_plugin
     # Open stdin and tty so when attaching key input works as expected.
-    stdin_open: true
-    tty: true
-
-  adl_web_proxy:
-    image: nginx:1.20.2-alpine
-    env_file:
-      - .env
-    volumes:
-      - static:/wagtail_static
-      - media:/wagtail_media
-      - $PWD/nginx.conf:/etc/nginx/nginx.conf
-    ports:
-      - ${WIS2BOX_ADL_WEB_PROXY_PORT:-80}:80
+    tty: true              # enables terminal support
+    stdin_open: true       # allows interactive input
 
 volumes:
   pgdata:
-  static:
-  media:
