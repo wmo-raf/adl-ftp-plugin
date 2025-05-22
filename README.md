@@ -1,6 +1,6 @@
 # ADL FTP Plugin
 
-Generic plugin for connecting to FTP servers, downloading and decoding AWS data files, for ingestion into a wis2box.
+Generic plugin for connecting to FTP servers, downloading and decoding AWS data files and saving to ADL database.
 
 ## Getting started
 
