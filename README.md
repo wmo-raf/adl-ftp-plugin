@@ -89,4 +89,50 @@ docker compose exec adl adl createsuperuser
 The `adl`command is shorthand for `python manage.py` command. You can use it to run any Django management command
 inside the container.
 
+## Concepts
+
+To use this plugin, you need to understand a few concepts relating to observation data collection, using FTP as a
+cache/storage mechanism.
+
+- FTP data collection
+- Data formats
+- Decoding the data to a standardized format
+
+### FTP data collection
+
+Most AWS vendors, provide a way to push observation data for individual stations to an FTP server, once collected. This
+could be directly from the station data logger to an FTP server, or from the vendor's data collection system to an FTP
+server. Despite the method, this process is usually automated and the data is pushed to the FTP server regularly,
+depending on the collection settings.
+
+To be able to use this plugin, you need an FTP server with the correct credentials.
+
+It is also important to understand the directory structure of the FTP server. For example:
+
+- Do you have a folder for each station or do you place all the files in a single folder?
+- Is the station directory structured by year/month/day or is it flat?
+- Is data written to a new file every time or is it appended to an existing file?
+
+This understanding is important because the plugin will need to know how to navigate the FTP server to find the data
+files. For each station, you will need to configure the plugin with the correct path to the data files.
+
+### Data formats and decoding
+
+Different AWS vendors provide data in different formats. The files are usually text files with different file extensions
+names like `.txt`, `.csv`, `.dat`, etc. These data files might be encoded and structured for transmission, and in this
+case, you will need to understand how to decode this data to get the actual observation data in an understandable
+format.
+
+The plugin provides a way to decode the data files using a decoder. The decoder is basically a python class that
+implements the `decode` method. This method takes the data file as input and returns the decoded data in a standardized
+format.
+
+The plugin provides a few inbuilt decoders for different data formats. These include:
+
+- `Toa5Decoder` for decoding files in the TOA5 format, a format mostly used by Campbell Scientific data loggers.
+- `SiapMicrosDecoder` for decoding files from Siap+Micros data loggers
+
+You can also create your own decoder and use it with the plugin.
+
+
 
