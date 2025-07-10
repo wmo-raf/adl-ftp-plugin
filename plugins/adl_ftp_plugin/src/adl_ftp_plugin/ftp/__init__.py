@@ -1,7 +1,31 @@
-from ftplib import FTP, error_perm
+import os
+import socket
+import ssl
+from ftplib import FTP, error_perm, error_temp, error_reply
 from io import IOBase, BytesIO
 
 from .utils import split_file_info
+
+FTP_CONNECTION_ERRORS = (
+    socket.gaierror, socket.herror,  # DNS
+    ConnectionRefusedError, socket.timeout,  # TCP
+    ssl.SSLError,  # TLS (if you add it)
+    error_temp, error_perm, error_reply,  # FTP status codes
+    OSError, EOFError, ConnectionResetError,  # low-level I/O
+    ValueError, TypeError  # bad args
+)
+
+
+class FTPError(Exception):
+    """ Base class for FTP errors """
+    
+    def __init__(self, message, status):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+    
+    def __str__(self):
+        return f"{self.message} (HTTP {self.status})"
 
 
 class FTPClient:
@@ -9,17 +33,21 @@ class FTPClient:
     tmp_output = None
     relative_paths = {'.', '..'}
     
-    def __init__(self, host, port, user, password, secure=False, passive=True, ):
+    def __init__(self, host, port, user, password, secure=False, passive=True, timeout=20):
         self.host = host
         self.port = port
         self.user = user
         self.password = password
         if port:
             FTP.port = port
-        self.conn = FTP(host=host, user=user, passwd=password)
         
-        if not passive:
-            self.conn.set_pasv(False)
+        try:
+            self.conn = FTP(host=host, user=user, passwd=password, timeout=timeout)
+            if not passive:
+                self.conn.set_pasv(False)
+        except FTP_CONNECTION_ERRORS as e:
+            message, status = map_ftp_error(e)
+            raise FTPError(message, status)
     
     def get(self, path, local=None):
         if isinstance(local, IOBase):  # open file, leave open
@@ -41,6 +69,44 @@ class FTPClient:
             local_file.close()
         
         return None
+    
+    def put(self, local, remote, contents=None, quiet=False):
+        """ Puts a local file (or contents) on to the FTP server
+
+            local can be:
+                a string: path to inpit file
+                a file: opened for reading
+                None: contents are pushed
+        """
+        remote_dir = os.path.dirname(remote)
+        remote_file = os.path.basename(local) \
+            if remote.endswith('/') else os.path.basename(remote)
+        
+        if contents:
+            # local is ignored if contents is set
+            local_file = BytesIO(contents)
+        elif isinstance(local, IOBase):
+            local_file = local
+        else:
+            local_file = open(local, 'rb')
+        
+        if remote_dir:
+            self.descend(remote_dir, force=True)
+        
+        size = 0
+        try:
+            self.conn.storbinary('STOR %s' % remote_file, local_file)
+            size = self.conn.size(remote_file)
+        except:
+            if not quiet:
+                raise
+        finally:
+            local_file.close()
+            if remote_dir:
+                depth = len(remote_dir.split('/'))
+                back = "/".join(['..' for d in range(depth)])
+                self.conn.cwd(back)
+        return size
     
     def cd(self, remote):
         """ Change working directory on server """
@@ -79,9 +145,41 @@ class FTPClient:
         else:
             return path not in self.relative_paths
     
+    def descend(self, remote, force=False):
+        """ Descend, possibly creating directories as needed """
+        remote_dirs = remote.split('/')
+        for directory in remote_dirs:
+            try:
+                self.conn.cwd(directory)
+            except Exception:
+                if force:
+                    self.conn.mkd(directory)
+                    self.conn.cwd(directory)
+        return self.conn.pwd()
+    
     def close(self):
         """ End the session """
         try:
             self.conn.quit()
         except Exception:
             self.conn.close()
+
+
+def map_ftp_error(exc):
+    """Translate concrete exceptions to message + HTTP code."""
+    if isinstance(exc, (socket.gaierror, socket.herror, ConnectionRefusedError)):
+        return "Unable to reach FTP host", 502
+    if isinstance(exc, socket.timeout):
+        return "FTP connection timed out", 504
+    if isinstance(exc, ssl.SSLError):
+        return "TLS handshake with FTP server failed", 502
+    if isinstance(exc, error_perm):
+        if str(exc).startswith("530"):
+            return "FTP Authentication failed", 401
+        return "FTP permission error", 403
+    if isinstance(exc, error_temp):
+        return "FTP server temporarily unavailable", 503
+    if isinstance(exc, error_reply):
+        return "Unexpected reply from FTP server", 502
+    # fallback
+    return str(exc), 400

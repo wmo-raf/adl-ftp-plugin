@@ -99,4 +99,7 @@ def split_file_info(fileinfo):
                 'datetime': dt_obj
             }))
     
+    # order by name
+    files.sort(key=lambda x: x.name.lower() if isinstance(x, dict) else x['name'].lower())
+    
     return files

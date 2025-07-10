@@ -1,0 +1,30 @@
+<div>
+    <div class="w-field__errors" style="margin-bottom: 10px">
+        <p class="error-message" id="error-message" style="display: none"></p>
+    </div>
+
+    <div style="display: flex;align-items: center">
+        <div id="{{widget.attrs.id}}-tree"></div>
+        <div id="spinner" style="margin-left: 10px;display: none">
+            <svg class="icon icon-spinner w-w-8 w-h-8" aria-hidden="true">
+                <use href="#icon-spinner"></use>
+            </svg>
+        </div>
+    </div>
+
+    <script>
+        const widgetId = '{{ widget.attrs.id }}-tree';
+        const initialValue = '{{ widget.value|default_if_none:"" }}';
+        const networkConnectionInputId = 'id_network_connection';
+        const baseUrl = '{{ftp_connection_dir_list_url}}'
+        const inputName = '{{ widget.name }}';
+
+        window.initTreeWidget(widgetId, {
+            inputName: inputName,
+            initialValue: initialValue,
+            baseUrl: baseUrl,
+            connectionInputElId: networkConnectionInputId,
+        });
+
+    </script>
+</div>

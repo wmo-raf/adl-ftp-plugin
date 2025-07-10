@@ -1,5 +1,5 @@
 from adl.core.models import DataParameter, Unit
-from adl.core.models import NetworkConnection, StationLink
+from adl.core.models import NetworkConnection, StationLink, DispatchChannel
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from modelcluster.fields import ParentalKey
@@ -7,8 +7,10 @@ from timezone_field import TimeZoneField
 from wagtail.admin.panels import MultiFieldPanel, FieldPanel, InlinePanel
 from wagtail.models import Orderable
 
+from adl_ftp_plugin.dispatchers.ftp import upload_to_ftp
 from adl_ftp_plugin.utils import get_ftp_decoder_choices
 from adl_ftp_plugin.validators import validate_start_date
+from adl_ftp_plugin.widgets import FTPDirectoryTreeSelectWidget
 
 
 class NetworkFTP(NetworkConnection):
@@ -100,7 +102,7 @@ class FTPStationLink(StationLink):
     
     panels = StationLink.panels + [
         MultiFieldPanel([
-            FieldPanel("ftp_path"),
+            FieldPanel("ftp_path", widget=FTPDirectoryTreeSelectWidget()),
             FieldPanel("file_pattern"),
         ], heading=_("FTP Configuration")),
         MultiFieldPanel([
@@ -116,7 +118,8 @@ class FTPStationLink(StationLink):
             FieldPanel("skip_already_processed_files"),
         ], heading=_("Data Collection")),
         InlinePanel("variable_mappings", label=_("Variable Mapping"), heading=_("Variable Mappings"),
-                    help_text=_("Set the station specific variable mapping for the data files, if the general variable mapping in Connection does not apply for this station  ")),
+                    help_text=_(
+                        "Set the station specific variable mapping for the data files, if the general variable mapping in Connection does not apply for this station  ")),
     ] + StationLink.aggregation_panels
     
     class Meta:
@@ -157,3 +160,41 @@ class FTPStationDataFile(models.Model):
     
     def __str__(self):
         return f"{self.station_link} - {self.file_name}"
+
+
+class FTPUpload(DispatchChannel):
+    host = models.CharField(max_length=255, verbose_name=_("FTP Host"))
+    port = models.CharField(max_length=255, verbose_name=_("FTP Port"))
+    user = models.CharField(max_length=255, verbose_name=_("FTP User"))
+    password = models.CharField(max_length=255, verbose_name=_("FTP Password"))
+    directory = models.CharField(max_length=255, verbose_name=_("FTP Directory"),
+                                 help_text=_("Directory on the FTP server to upload files to"))
+    timezone = TimeZoneField(default='UTC', verbose_name=_("Timezone to use for date/time"),
+                             help_text=_("Timezone used by the station for recording observations"))
+    
+    panels = DispatchChannel.base_panels + [
+        MultiFieldPanel([
+            FieldPanel("host"),
+            FieldPanel("port"),
+            FieldPanel("user"),
+            FieldPanel("password"),
+            FieldPanel("directory"),
+        ], heading=_("FTP Configuration")),
+        FieldPanel("timezone"),
+    ] + DispatchChannel.parameter_panels
+    
+    class Meta:
+        verbose_name = _("FTP Upload")
+        verbose_name_plural = _("FTP Uploads")
+    
+    def send_data(self, data_records):
+        return upload_to_ftp(self, data_records)
+    
+    @property
+    def connection_details(self):
+        return {
+            "host": self.host,
+            "port": self.port,
+            "user": self.user,
+            "password": self.password,
+        }
