@@ -68,7 +68,7 @@ def channel_record_to_ftp_file(record, parameter_mappings, timezone="UTC"):
     
     filename = f"WIGOS_{station.wigos_id}_{timestamp.strftime('%Y%m%dT%H%M%S')}.csv"
     
-    return csv_content, filename
+    return csv_content, station.wigos_id, filename,
 
 
 def upload_to_ftp(channel, data_records):
@@ -84,7 +84,7 @@ def upload_to_ftp(channel, data_records):
     
     try:
         for record in data_records:
-            csv_content, filename = channel_record_to_ftp_file(record, parameter_mappings, timezone)
+            csv_content, wigos_id, filename = channel_record_to_ftp_file(record, parameter_mappings, timezone)
             
             if not csv_content:
                 logger.error("Error converting record to CSV. Skipping...")
@@ -92,7 +92,7 @@ def upload_to_ftp(channel, data_records):
             # Convert csv_content to bytes for uploading
             csv_bytes = BytesIO(csv_content.encode('utf-8'))
             
-            remote_file = f"{channel.directory}/{filename}"
+            remote_file = f"{channel.directory}/{wigos_id}/{filename}"
             
             ftp_client.put(csv_bytes, remote_file)
             
