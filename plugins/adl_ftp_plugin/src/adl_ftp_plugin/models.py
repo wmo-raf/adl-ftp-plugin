@@ -163,6 +163,10 @@ class FTPStationDataFile(models.Model):
 
 
 class FTPUpload(DispatchChannel):
+    WRITE_MODES = (
+        ("append", _("Append record to single daily file")),
+        ("new_file", _("Create a new file for each record")),
+    )
     host = models.CharField(max_length=255, verbose_name=_("FTP Host"))
     port = models.CharField(max_length=255, verbose_name=_("FTP Port"))
     user = models.CharField(max_length=255, verbose_name=_("FTP User"))
@@ -172,6 +176,9 @@ class FTPUpload(DispatchChannel):
     timezone = TimeZoneField(default='UTC', verbose_name=_("Timezone to use for date/time"),
                              help_text=_("Timezone used by the station for recording observations"))
     
+    write_mode = models.CharField(max_length=20, choices=WRITE_MODES, default="append",
+                                  verbose_name=_("FTP Write Mode"))
+    
     panels = DispatchChannel.base_panels + [
         MultiFieldPanel([
             FieldPanel("host"),
@@ -179,8 +186,8 @@ class FTPUpload(DispatchChannel):
             FieldPanel("user"),
             FieldPanel("password"),
             FieldPanel("directory"),
+            FieldPanel("write_mode"),
         ], heading=_("FTP Configuration")),
-        FieldPanel("timezone"),
     ] + DispatchChannel.parameter_panels
     
     class Meta:
