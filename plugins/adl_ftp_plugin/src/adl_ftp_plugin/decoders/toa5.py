@@ -120,7 +120,13 @@ class Toa5Decoder(FTPDecoder):
                     timestamp = datetime.strptime(val, "%Y-%m-%d %H:%M:%S")
                     line_data[column] = timestamp
                 else:
-                    line_data[column] = float(val)
+                    try:
+                        # Try to convert the value to a float
+                        val = float(val)
+                        line_data[column] = float(val)
+                    except ValueError:
+                        # If conversion fails, ignore this column
+                        pass
             
             # If the timestamp already exists, update the entry with the current values
             if 'TIMESTAMP' in line_data:
