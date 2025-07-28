@@ -138,7 +138,7 @@ def upload_to_ftp(channel, data_records: List[Dict]):
     
     try:
         if write_mode == "new_file":
-            logger.debug(f"Creating new files for {len(data_records)} records")
+            logger.debug(f"[FTP Dispatch] Creating new files for {len(data_records)} records")
             for data in data_records:
                 record = ObsRecord(
                     station_id=data.get("station_id"),
@@ -150,7 +150,7 @@ def upload_to_ftp(channel, data_records: List[Dict]):
                 filename = f"WIGOS_{record.wigos_id}_{record.timestamp.strftime('%Y%m%dT%H%M%S')}.csv"
                 remote_path = f"{channel.directory}/{record.wigos_id}/{filename}"
                 
-                logger.debug(f"Uploading file to '{remote_path}'")
+                logger.debug(f"[FTP Dispatch] Uploading file to '{remote_path}'")
                 
                 ftp.put(csv_file, remote_path)
                 update_dispatch_status(channel, record.station_id, record.timestamp)
@@ -173,15 +173,15 @@ def upload_to_ftp(channel, data_records: List[Dict]):
                     final_records = {}
                     
                     try:
-                        logger.debug(f"Checking for existing file at '{remote_path}'")
+                        logger.debug(f"[FTP Dispatch] Checking for existing file at '{remote_path}'")
                         existing_csv = ftp.get(remote_path)
                         
-                        logger.debug(f"Found existing file at '{remote_path}'")
+                        logger.debug(f"[FTP Dispatch] Found existing file at '{remote_path}'")
                         
                         existing_records = csv_to_records(existing_csv, csv_header, channel_params, timezone)
                         existing_timestamps = {r.timestamp for r in existing_records}
                         
-                        logger.debug(f"Checking for new records to append for '{remote_path}'")
+                        logger.debug(f"[FTP Dispatch] Checking for new records to append for '{remote_path}'")
                         
                         # check if we have new records to append
                         new_records = []
@@ -190,14 +190,14 @@ def upload_to_ftp(channel, data_records: List[Dict]):
                                 new_records.append(record)
                         
                         if not new_records:
-                            logger.debug(f"No new records to append for '{remote_path}'. Skipping..")
+                            logger.debug(f"[FTP Dispatch] No new records to append for '{remote_path}'. Skipping..")
                             continue
                         
-                        logger.debug(f"Found {len(new_records)} new records. Appending...")
+                        logger.debug(f"[FTP Dispatch] Found {len(new_records)} new records. Appending...")
                         
                         final_records = {r.timestamp: r for r in existing_records}
                     except error_perm:
-                        logger.debug(f"No existing file for '{remote_path}'. Creating new.")
+                        logger.debug(f"[FTP Dispatch] No existing file for '{remote_path}'. Creating new.")
                     
                     # Append new records to existing ones
                     final_records.update(incoming_records)
@@ -212,5 +212,5 @@ def upload_to_ftp(channel, data_records: List[Dict]):
     finally:
         ftp.close()
     
-    logger.info(f"Uploaded {uploaded} file to {channel.name}")
+    logger.info(f"[FTP Dispatch] Uploaded {uploaded} file to {channel.name}")
     return uploaded
