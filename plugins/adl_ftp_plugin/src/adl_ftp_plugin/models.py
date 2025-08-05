@@ -49,6 +49,20 @@ class FTPVariableMapping(Orderable):
         FieldPanel("file_variable_name"),
         FieldPanel("file_variable_unit"),
     ]
+    
+    @property
+    def source_parameter_name(self):
+        """
+        Returns the shortcode of the TAHMO variable.
+        """
+        return self.file_variable_name
+    
+    @property
+    def source_parameter_unit(self):
+        """
+        Returns the unit of the TAHMO variable.
+        """
+        return self.file_variable_unit
 
 
 class FTPStationLink(StationLink):
@@ -115,7 +129,6 @@ class FTPStationLink(StationLink):
         MultiFieldPanel([
             FieldPanel("start_date"),
             FieldPanel("skip_already_downloaded_files"),
-            FieldPanel("skip_already_processed_files"),
         ], heading=_("Data Collection")),
         InlinePanel("variable_mappings", label=_("Variable Mapping"), heading=_("Variable Mappings"),
                     help_text=_(
@@ -128,6 +141,32 @@ class FTPStationLink(StationLink):
     
     def __str__(self):
         return f"{self.network_connection} - {self.station.wigos_id} - {self.station}"
+    
+    def get_variable_mappings(self):
+        """
+        Returns the variable mappings for this station link.
+        """
+        
+        connection_variable_mappings = self.network_connection.variable_mappings.all() or []
+        station_variable_mappings = self.variable_mappings.all() or []
+        
+        resolved = {m.adl_parameter_id: m for m in connection_variable_mappings}
+        resolved.update({m.adl_parameter_id: m for m in station_variable_mappings})
+        
+        return list(resolved.values())
+    
+    def get_first_collection_date(self):
+        """
+        Returns the first collection date for this station link.
+        Returns None if no start date is set.
+        """
+        return self.start_date
+    
+    def get_timezone(self):
+        """
+        Returns the timezone for this station link.
+        """
+        return self.timezone
 
 
 class FTPStationLinkVariableMapping(Orderable):
@@ -141,6 +180,20 @@ class FTPStationLinkVariableMapping(Orderable):
         FieldPanel("file_variable_name"),
         FieldPanel("file_variable_unit"),
     ]
+    
+    @property
+    def source_parameter_name(self):
+        """
+        Returns the shortcode of the TAHMO variable.
+        """
+        return self.file_variable_name
+    
+    @property
+    def source_parameter_unit(self):
+        """
+        Returns the unit of the TAHMO variable.
+        """
+        return self.file_variable_unit
 
 
 def get_ftp_data_file_upload_path(instance, filename):

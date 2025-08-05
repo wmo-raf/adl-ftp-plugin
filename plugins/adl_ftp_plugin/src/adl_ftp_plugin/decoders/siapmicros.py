@@ -66,7 +66,7 @@ class SiapMicrosDecoder(FTPDecoder):
                 
                 params_data = {
                     "station_id": station_id,
-                    "TIMESTAMP": obs_date,
+                    "observation_time": obs_date,
                 }
                 
                 for param_data in blocks_units_data:
