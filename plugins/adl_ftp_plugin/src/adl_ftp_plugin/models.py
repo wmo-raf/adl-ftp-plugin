@@ -98,9 +98,6 @@ class FTPStationLink(StationLink):
                                                     "This will be used to construct the final name of the folder in the FTP path"))
     month_dir_format = models.CharField(max_length=255, blank=True, null=True, choices=MONTH_FORMAT_CHOICES,
                                         default="m", verbose_name=_("Month directory Format"), )
-    timezone = TimeZoneField(default='UTC', verbose_name=_("Station Timezone"),
-                             help_text=_("Timezone used by the station for recording observations"))
-    
     start_date = models.DateTimeField(blank=True, null=True, validators=[validate_start_date],
                                       verbose_name=_("Start Date"),
                                       help_text=_("Start date for data pulling. Select a past date to include the "
@@ -123,7 +120,6 @@ class FTPStationLink(StationLink):
             FieldPanel("dir_structured_by_date"),
             FieldPanel("date_granularity"),
             FieldPanel("month_dir_format"),
-            FieldPanel("timezone"),
         ], heading=_("File Structure")),
         
         MultiFieldPanel([
@@ -161,12 +157,6 @@ class FTPStationLink(StationLink):
         Returns None if no start date is set.
         """
         return self.start_date
-    
-    def get_timezone(self):
-        """
-        Returns the timezone for this station link.
-        """
-        return self.timezone
 
 
 class FTPStationLinkVariableMapping(Orderable):
