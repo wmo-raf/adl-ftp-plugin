@@ -69,7 +69,7 @@ class AdlFtpPlugin(Plugin):
                 return
             
             net_ftp_name = network_conn_ftp.network.name
-            timezone_info = station_link.timezone
+            timezone_info = station_link.timezone_info
             station_name = station_link.station.name
             
             path = station_link.ftp_path
