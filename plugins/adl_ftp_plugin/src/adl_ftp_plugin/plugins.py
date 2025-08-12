@@ -32,7 +32,7 @@ class AdlFtpPlugin(Plugin):
         return ftp_decoder_registry.get(decoder_name)
     
     def get_default_start_date(self, station_link):
-        start_date = dj_timezone.localtime()
+        start_date = dj_timezone.localtime(dj_timezone.now(), timezone=station_link.timezone_info)
         return start_date
     
     def get_station_data(self, station_link, start_date=None, end_date=None):
