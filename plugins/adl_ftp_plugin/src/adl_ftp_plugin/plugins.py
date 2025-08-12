@@ -32,7 +32,7 @@ class AdlFtpPlugin(Plugin):
         return ftp_decoder_registry.get(decoder_name)
     
     def get_default_start_date(self, station_link):
-        start_date = dj_timezone.localtime(dj_timezone.now(), timezone=station_link.timezone_info)
+        start_date = dj_timezone.localtime(dj_timezone.now(), timezone=station_link.timezone)
         return start_date
     
     def get_station_data(self, station_link, start_date=None, end_date=None):
@@ -69,7 +69,7 @@ class AdlFtpPlugin(Plugin):
                 return
             
             net_ftp_name = network_conn_ftp.network.name
-            timezone_info = station_link.timezone_info
+            timezone = station_link.timezone
             station_name = station_link.station.name
             
             path = station_link.ftp_path
@@ -79,8 +79,7 @@ class AdlFtpPlugin(Plugin):
                 date_granularity = station_link.date_granularity
                 month_dir_format = station_link.month_dir_format
                 
-                dates = get_dates_to_now(date_granularity=date_granularity, timezone=timezone_info,
-                                         from_date=start_date)
+                dates = get_dates_to_now(date_granularity=date_granularity, timezone=timezone, from_date=start_date)
                 
                 paths = get_date_paths(path, dates, date_granularity, month_dir_format)
             else:
