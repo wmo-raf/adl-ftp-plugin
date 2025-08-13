@@ -97,26 +97,6 @@ def group_records_by_station_day(records: List[ObsRecord]):
     return grouped
 
 
-def update_dispatch_status(channel, station_id, timestamp):
-    from adl.core.models import StationChannelDispatchStatus
-    
-    status = get_object_or_none(
-        StationChannelDispatchStatus,
-        channel_id=channel.id,
-        station_id=station_id
-    )
-    if status:
-        status.last_sent_obs_time = timestamp
-        status.save()
-    else:
-        status = StationChannelDispatchStatus.objects.create(
-            channel_id=channel.id,
-            station_id=station_id,
-            last_sent_obs_time=timestamp
-        )
-    return status
-
-
 def create_csv_file(records: List[ObsRecord], header: List[str], timezone) -> BytesIO:
     output = StringIO()
     writer = csv.writer(output)
@@ -135,6 +115,7 @@ def upload_to_ftp(channel, data_records: List[Dict]):
     channel_params = [pm.channel_parameter for pm in channel.parameter_mappings.all()]
     csv_header = ["station_id", "wigos_id", "date", "time"] + channel_params
     uploaded = 0
+    last_sent_obs_time = None
     
     try:
         if write_mode == "new_file":
@@ -153,7 +134,7 @@ def upload_to_ftp(channel, data_records: List[Dict]):
                 logger.debug(f"[FTP Dispatch] Uploading file to '{remote_path}'")
                 
                 ftp.put(csv_file, remote_path)
-                update_dispatch_status(channel, record.station_id, record.timestamp)
+                last_sent_obs_time = record.timestamp
                 uploaded += 1
         
         elif write_mode == "append":
@@ -206,11 +187,11 @@ def upload_to_ftp(channel, data_records: List[Dict]):
                     csv_file = create_csv_file(final_records, csv_header, timezone)
                     ftp.put(csv_file, remote_path)
                     latest_record = max(final_records, key=lambda r: r.timestamp)
-                    update_dispatch_status(channel, latest_record.station_id, latest_record.timestamp)
+                    last_sent_obs_time = latest_record.timestamp
                     uploaded += 1
     
     finally:
         ftp.close()
     
     logger.info(f"[FTP Dispatch] Uploaded {uploaded} file to {channel.name}")
-    return uploaded
+    return uploaded, last_sent_obs_time

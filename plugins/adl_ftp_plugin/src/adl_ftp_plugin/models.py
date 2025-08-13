@@ -237,8 +237,8 @@ class FTPUpload(DispatchChannel):
         verbose_name = _("FTP Upload")
         verbose_name_plural = _("FTP Uploads")
     
-    def send_data(self, data_records):
-        return upload_to_ftp(self, data_records)
+    def send_station_data(self, station_link, station_data_records):
+        return upload_to_ftp(self, station_data_records)
     
     @property
     def connection_details(self):
