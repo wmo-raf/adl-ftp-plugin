@@ -96,7 +96,8 @@ class AdlFtpPlugin(Plugin):
                     logger.warning(f"[ADL_FTP_PLUGIN] Path {path} not found")
                     continue
                 
-                path_records = self.process_path(station_link, path, decoder, ftp_client)
+                path_records = self.process_path(station_link, path, decoder, ftp_client, start_date=start_date,
+                                                 end_date=end_date)
                 records.extend(path_records)
             
             return records
@@ -106,7 +107,7 @@ class AdlFtpPlugin(Plugin):
             if ftp_client:
                 ftp_client.close()
     
-    def process_path(self, station_link, path, decoder, ftp_client):
+    def process_path(self, station_link, path, decoder, ftp_client, start_date=None, end_date=None):
         station = station_link.station
         
         logger.debug(f"[ADL_FTP_PLUGIN] Getting list of files in path {path}")
@@ -117,7 +118,7 @@ class AdlFtpPlugin(Plugin):
         files_list = [file["name"] for file in ftp_files_list]
         
         # get the matching files
-        matching_files = decoder.get_matching_files(station_link, files_list)
+        matching_files = decoder.get_matching_files(station_link, files_list, start_date, end_date)
         
         # If no files found, log and continue
         if not matching_files:

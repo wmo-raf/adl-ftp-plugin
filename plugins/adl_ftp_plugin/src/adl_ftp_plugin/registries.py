@@ -38,7 +38,7 @@ class FTPDecoder(Instance):
         """
         raise NotImplementedError
     
-    def get_matching_files(self, station_link, files):
+    def get_matching_files(self, station_link, files, start_date=None, end_date=None):
         """
         Returns a list of files that match the decoder.
 
