@@ -36,6 +36,21 @@ class NetworkFTP(NetworkConnection):
     class Meta:
         verbose_name = _("Network FTP")
         verbose_name_plural = _("Network FTPs")
+    
+    @property
+    def ftp_connection_details(self):
+        return {
+            "host": self.host,
+            "port": self.port,
+            "user": self.username,
+            "password": self.password
+        }
+    
+    def get_ftp_client(self):
+        from .ftp import FTPClient
+        connection_details = self.ftp_connection_details
+        ftp_client = FTPClient(**connection_details)
+        return ftp_client
 
 
 class FTPVariableMapping(Orderable):
