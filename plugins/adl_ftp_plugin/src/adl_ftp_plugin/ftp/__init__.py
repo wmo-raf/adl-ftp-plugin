@@ -6,6 +6,11 @@ from io import IOBase, BytesIO
 
 from .utils import split_file_info
 
+try:
+    from ftplib import FTP_TLS
+except ImportError:
+    FTP_TLS = None
+
 FTP_CONNECTION_ERRORS = (
     socket.gaierror, socket.herror,  # DNS
     ConnectionRefusedError, socket.timeout,  # TCP
@@ -33,16 +38,22 @@ class FTPClient:
     tmp_output = None
     relative_paths = {'.', '..'}
     
-    def __init__(self, host, port, user, password, secure=False, passive=True, timeout=20):
+    def __init__(self, host, port, user, password, secure=False, passive=True, timeout=20, **kwargs):
         self.host = host
         self.port = port
         self.user = user
         self.password = password
         if port:
             FTP.port = port
-        
         try:
-            self.conn = FTP(host=host, user=user, passwd=password, timeout=timeout)
+            if secure and FTP_TLS:
+                if port:
+                    if self.port:
+                        FTP_TLS.port = self.port
+                    self.conn = FTP_TLS(host=host, user=user, passwd=password, **kwargs)
+                    self.conn.prot_p()
+            else:
+                self.conn = FTP(host=host, user=user, passwd=password, timeout=timeout, **kwargs)
             if not passive:
                 self.conn.set_pasv(False)
         except FTP_CONNECTION_ERRORS as e:

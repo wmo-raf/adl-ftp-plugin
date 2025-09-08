@@ -21,6 +21,8 @@ class NetworkFTP(NetworkConnection):
     username = models.CharField(max_length=255, verbose_name=_("Username"))
     password = models.CharField(max_length=255, verbose_name=_("Password"))
     decoder = models.CharField(max_length=255, choices=get_ftp_decoder_choices, verbose_name=_("Decoder"))
+    passive_mode = models.BooleanField(default=True, verbose_name=_("Use FTP Passive mode"))
+    secure = models.BooleanField(default=False, verbose_name=_("Secure"))
     
     panels = NetworkConnection.panels + [
         MultiFieldPanel([
@@ -28,6 +30,8 @@ class NetworkFTP(NetworkConnection):
             FieldPanel("port"),
             FieldPanel("username"),
             FieldPanel("password"),
+            FieldPanel("passive_mode"),
+            FieldPanel("secure"),
         ], heading=_("FTP Credentials")),
         FieldPanel("decoder"),
         InlinePanel("variable_mappings", label=_("Variable Mapping"), heading=_("Variable Mappings")),
@@ -43,7 +47,9 @@ class NetworkFTP(NetworkConnection):
             "host": self.host,
             "port": self.port,
             "user": self.username,
-            "password": self.password
+            "password": self.password,
+            "passive": self.passive_mode,
+            "secure": self.secure,
         }
     
     def get_ftp_client(self):

@@ -4,7 +4,6 @@ import tempfile
 from adl.core.registries import Plugin
 from django.utils import timezone as dj_timezone
 
-from .ftp import FTPClient
 from .models import FTPStationDataFile
 from .registries import ftp_decoder_registry
 from .utils import (
@@ -54,12 +53,7 @@ class AdlFtpPlugin(Plugin):
         ftp_client = None
         
         try:
-            ftp_client = FTPClient(
-                host=network_conn_ftp.host,
-                port=network_conn_ftp.port,
-                user=network_conn_ftp.username,
-                password=network_conn_ftp.password
-            )
+            ftp_client = network_conn_ftp.get_ftp_client()
             
             # get the decoder from the registry
             decoder = self.get_decoder(decoder_name)

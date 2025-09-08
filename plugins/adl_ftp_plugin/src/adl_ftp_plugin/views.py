@@ -22,22 +22,18 @@ def get_ftp_connection_dir_list(request):
     if remote_path is None:
         return JsonResponse({"error": "Invalid remote path"}, status=400)
     
+    ftp_client = None
     try:
-        ftp_client = FTPClient(
-            host=connection.host,
-            port=connection.port,
-            user=connection.username,
-            password=connection.password
-        )
+        ftp_client = connection.get_ftp_client()
+        directories = get_ftp_dir_list(ftp_client, remote_path)
+        ftp_client.close()
+        return JsonResponse({"directories": directories}, status=200)
     except FTPError as e:
+        if ftp_client is not None:
+            ftp_client.close()
+        
         return JsonResponse({"error": e.message}, status=e.status)
     except Exception as e:
+        if ftp_client is not None:
+            ftp_client.close()
         return JsonResponse({"error": str(e)}, status=400)
-    
-    try:
-        directories = get_ftp_dir_list(ftp_client, remote_path)
-        return JsonResponse({"directories": directories}, status=200)
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=400)
-    finally:
-        ftp_client.close()
