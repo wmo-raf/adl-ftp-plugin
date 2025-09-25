@@ -4,12 +4,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from ftplib import error_perm
 from io import StringIO, BytesIO
-from typing import List, Dict
+from typing import List, Dict, Tuple, Optional
 
 import pandas as pd
-from adl_ftp_plugin.ftp import FTPClient
 
-from adl.core.utils import get_object_or_none
+from adl_ftp_plugin.ftp import FTPClient
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +55,7 @@ def extract_values(record, keys, from_root=True):
 @dataclass
 class ObsRecord:
     station_id: str
-    wigos_id: str
+    wigos_id: Optional[str]
     timestamp: pd.Timestamp
     values: dict
     
@@ -64,11 +63,22 @@ class ObsRecord:
         dt = self.timestamp.astimezone(timezone)
         base = {
             "station_id": self.station_id,
-            "wigos_id": self.wigos_id,
-            "date": dt.strftime("%Y-%m-%d"),
-            "time": dt.strftime("%H:%M:%S"),
             **self.values
         }
+        
+        # Only include wigos_id if it's in the header
+        if "wigos_id" in header:
+            base["wigos_id"] = self.wigos_id or ""
+        
+        # Handle timestamp format based on header columns
+        if "timestamp" in header:
+            # Single timestamp column in UTC ISO format
+            base["timestamp"] = dt.strftime("%Y%m%dT%H%M%S")
+        else:
+            # Separate date and time columns
+            base["date"] = dt.strftime("%Y-%m-%d")
+            base["time"] = dt.strftime("%H:%M:%S")
+        
         return [base.get(col, "") for col in header]
 
 
@@ -91,107 +101,252 @@ def csv_to_records(csv_content, csv_header, value_columns, timezone="UTC") -> Li
 def group_records_by_station_day(records: List[ObsRecord]):
     grouped = {}
     for record in records:
-        sid = record.wigos_id
+        # Use wigos_id if available, otherwise fall back to station_id
+        sid = record.wigos_id or record.station_id
         day = record.timestamp.strftime("%Y-%m-%d")
         grouped.setdefault(sid, {}).setdefault(day, {})[record.timestamp] = record
     return grouped
 
 
-def create_csv_file(records: List[ObsRecord], header: List[str], timezone) -> BytesIO:
+def create_csv_file(records: List[ObsRecord], header: List[str], timezone, include_header: bool = True) -> BytesIO:
     output = StringIO()
     writer = csv.writer(output)
-    writer.writerow(header)
+    
+    # Only write header if requested
+    if include_header:
+        writer.writerow(header)
+    
     for record in records:
         writer.writerow(record.to_row(header, timezone))
     return BytesIO(output.getvalue().encode("utf-8"))
 
 
-# --- FTP Upload Logic ---
+# --- Simplified FTP Upload Logic ---
 
-def upload_to_ftp(channel, data_records: List[Dict]):
-    ftp = FTPClient(**channel.connection_details)
+def upload_csv_to_ftp(ftp_client: FTPClient, csv_file: BytesIO, remote_path: str) -> None:
+    """
+    Upload a single CSV file to FTP server.
+    
+    Args:
+        ftp_client: Connected FTP client
+        csv_file: CSV file as BytesIO object
+        remote_path: Full remote path where file should be uploaded
+    """
+    logger.debug(f"[FTP Upload] Uploading file to '{remote_path}'")
+    ftp_client.put(csv_file, remote_path)
+
+
+def prepare_csv_files_new_mode(
+        data_records: List[Dict],
+        channel,
+        create_station_dir: bool = True,
+        include_wigos_id: bool = True,
+        use_single_timestamp: bool = False,
+        include_header: bool = True
+) -> List[Tuple[BytesIO, str]]:
+    """
+    Prepare CSV files for 'new_file' write mode.
+    Each record becomes a separate CSV file.
+    
+    Args:
+        include_wigos_id: Whether to include wigos_id column in CSV header
+        use_single_timestamp: If True, use single 'timestamp' column in UTC ISO format (20110311T131920).
+                             If False, use separate 'date' and 'time' columns.
+        include_header: Whether to include the header row in CSV files
+    
+    Returns:
+        List of (csv_file, remote_path) tuples
+    """
     timezone = channel.timezone
+    channel_params = channel.get_parameter_mapping_values()
+    
+    # Build header based on flags
+    csv_header = ["station_id"]
+    if include_wigos_id:
+        csv_header.append("wigos_id")
+    
+    # Add timestamp columns
+    if use_single_timestamp:
+        csv_header.append("timestamp")
+    else:
+        csv_header.extend(["date", "time"])
+    
+    csv_header.extend(channel_params)
+    
+    csv_files = []
+    
+    for data in data_records:
+        record = ObsRecord(
+            station_id=data.get("station_id"),
+            wigos_id=data.get("wigos_id"),  # Can be None
+            timestamp=make_aware_timestamp(data.get("timestamp"), timezone),
+            values=extract_values(data, channel_params, from_root=False)
+        )
+        
+        csv_file = create_csv_file([record], csv_header, timezone, include_header)
+        
+        # Use wigos_id if available, otherwise use station_id for filename and directory
+        id_for_path = record.wigos_id or record.station_id
+        filename = f"WIGOS_{id_for_path}_{record.timestamp.strftime('%Y%m%dT%H%M%S')}.csv"
+        
+        if create_station_dir:
+            remote_path = f"{channel.directory}/{id_for_path}/{filename}"
+        else:
+            remote_path = f"{channel.directory}/{filename}"
+        
+        csv_files.append((csv_file, remote_path))
+    
+    return csv_files
+
+
+def prepare_csv_files_append_mode(
+        data_records: List[Dict],
+        channel,
+        ftp_client: FTPClient,
+        create_station_dir: bool = True,
+        include_wigos_id: bool = True,
+        use_single_timestamp: bool = False,
+        include_header: bool = True
+) -> List[Tuple[BytesIO, str]]:
+    """
+    Prepare CSV files for 'append' write mode.
+    Groups records by station and day, merging with existing files if they exist.
+    
+    Args:
+        include_wigos_id: Whether to include wigos_id column in CSV header
+        use_single_timestamp: If True, use single 'timestamp' column in UTC ISO format (20110311T131920).
+                             If False, use separate 'date' and 'time' columns.
+        include_header: Whether to include the header row in CSV files
+    
+    Returns:
+        List of (csv_file, remote_path) tuples
+    """
+    timezone = channel.timezone
+    channel_params = channel.get_parameter_mapping_values()
+    
+    # Build header based on flags
+    csv_header = ["station_id"]
+    if include_wigos_id:
+        csv_header.append("wigos_id")
+    
+    # Add timestamp columns
+    if use_single_timestamp:
+        csv_header.append("timestamp")
+    else:
+        csv_header.extend(["date", "time"])
+    
+    csv_header.extend(channel_params)
+    
+    # Group records by station and day
+    grouped = group_records_by_station_day([
+        ObsRecord(
+            station_id=d.get("station_id"),
+            wigos_id=d.get("wigos_id"),  # Can be None
+            timestamp=make_aware_timestamp(d.get("timestamp"), timezone),
+            values=extract_values(d, channel_params, from_root=False))
+        for d in data_records
+    ])
+    
+    csv_files = []
+    
+    for station_id, days in grouped.items():
+        for day, incoming_records in days.items():
+            # station_id here is actually the id_for_path (wigos_id or station_id fallback)
+            filename = f"WIGOS_{station_id}_{day.replace('-', '')}.csv"
+            if create_station_dir:
+                remote_path = f"{channel.directory}/{station_id}/{filename}"
+            else:
+                remote_path = f"{channel.directory}/{filename}"
+            
+            final_records = {}
+            
+            try:
+                logger.debug(f"[FTP Prepare] Checking for existing file at '{remote_path}'")
+                existing_csv = ftp_client.get(remote_path)
+                
+                logger.debug(f"[FTP Prepare] Found existing file at '{remote_path}'")
+                
+                existing_records = csv_to_records(existing_csv, csv_header, channel_params, timezone)
+                existing_timestamps = {r.timestamp for r in existing_records}
+                
+                logger.debug(f"[FTP Prepare] Checking for new records to append for '{remote_path}'")
+                
+                # Check if we have new records to append
+                new_records = []
+                for ts, record in incoming_records.items():
+                    if ts not in existing_timestamps:
+                        new_records.append(record)
+                
+                if not new_records:
+                    logger.debug(f"[FTP Prepare] No new records to append for '{remote_path}'. Skipping..")
+                    continue
+                
+                logger.debug(f"[FTP Prepare] Found {len(new_records)} new records. Appending...")
+                
+                final_records = {r.timestamp: r for r in existing_records}
+            except error_perm:
+                logger.debug(f"[FTP Prepare] No existing file for '{remote_path}'. Creating new.")
+            
+            # Append new records to existing ones
+            final_records.update(incoming_records)
+            
+            final_records_list = list(final_records.values())
+            csv_file = create_csv_file(final_records_list, csv_header, timezone, include_header)
+            csv_files.append((csv_file, remote_path))
+    
+    return csv_files
+
+
+def dispatch_to_ftp(channel, data_records: List[Dict], create_station_dir=True, include_wigos_id=True,
+                    use_single_timestamp=False, include_header=True):
+    """
+    Main dispatch function that coordinates CSV preparation and FTP upload.
+    
+    Args:
+        channel: Channel configuration object
+        data_records: List of data records to process
+        create_station_dir: Whether to create station directories
+        include_wigos_id: Whether to include wigos_id column in CSV files
+        use_single_timestamp: If True, use single 'timestamp' column in UTC ISO format (20110311T131920).
+                             If False, use separate 'date' and 'time' columns.
+        include_header: Whether to include the header row in CSV files
+    """
+    ftp = FTPClient(**channel.connection_details)
     write_mode = channel.write_mode
-    channel_params = [pm.channel_parameter for pm in channel.parameter_mappings.all()]
-    csv_header = ["station_id", "wigos_id", "date", "time"] + channel_params
     uploaded = 0
     last_sent_obs_time = None
     
     try:
         if write_mode == "new_file":
             logger.debug(f"[FTP Dispatch] Creating new files for {len(data_records)} records")
-            for data in data_records:
-                record = ObsRecord(
-                    station_id=data.get("station_id"),
-                    wigos_id=data.get("wigos_id"),
-                    timestamp=make_aware_timestamp(data.get("timestamp"), timezone),
-                    values=extract_values(data, channel_params, from_root=False)
-                )
-                csv_file = create_csv_file([record], csv_header, timezone)
-                filename = f"WIGOS_{record.wigos_id}_{record.timestamp.strftime('%Y%m%dT%H%M%S')}.csv"
-                remote_path = f"{channel.directory}/{record.wigos_id}/{filename}"
-                
-                logger.debug(f"[FTP Dispatch] Uploading file to '{remote_path}'")
-                
-                ftp.put(csv_file, remote_path)
-                last_sent_obs_time = record.timestamp
+            csv_files = prepare_csv_files_new_mode(data_records, channel, create_station_dir, include_wigos_id,
+                                                   use_single_timestamp, include_header)
+            
+            for csv_file, remote_path in csv_files:
+                upload_csv_to_ftp(ftp, csv_file, remote_path)
                 uploaded += 1
+            
+            # Get the last timestamp from the original records
+            if data_records:
+                timestamps = [make_aware_timestamp(d.get("timestamp"), channel.timezone) for d in data_records]
+                last_sent_obs_time = max(timestamps)
         
         elif write_mode == "append":
-            grouped = group_records_by_station_day([
-                ObsRecord(
-                    station_id=d.get("station_id"),
-                    wigos_id=d.get("wigos_id"),
-                    timestamp=make_aware_timestamp(d.get("timestamp"), timezone),
-                    values=extract_values(d, channel_params, from_root=False))
-                for d in data_records
-            ])
+            logger.debug(f"[FTP Dispatch] Appending records to existing files")
+            csv_files = prepare_csv_files_append_mode(data_records, channel, ftp, create_station_dir, include_wigos_id,
+                                                      use_single_timestamp, include_header)
             
-            for wigos_id, days in grouped.items():
-                for day, incoming_records in days.items():
-                    filename = f"WIGOS_{wigos_id}_{day.replace('-', '')}.csv"
-                    remote_path = f"{channel.directory}/{wigos_id}/{filename}"
-                    final_records = {}
-                    
-                    try:
-                        logger.debug(f"[FTP Dispatch] Checking for existing file at '{remote_path}'")
-                        existing_csv = ftp.get(remote_path)
-                        
-                        logger.debug(f"[FTP Dispatch] Found existing file at '{remote_path}'")
-                        
-                        existing_records = csv_to_records(existing_csv, csv_header, channel_params, timezone)
-                        existing_timestamps = {r.timestamp for r in existing_records}
-                        
-                        logger.debug(f"[FTP Dispatch] Checking for new records to append for '{remote_path}'")
-                        
-                        # check if we have new records to append
-                        new_records = []
-                        for ts, record in incoming_records.items():
-                            if ts not in existing_timestamps:
-                                new_records.append(record)
-                        
-                        if not new_records:
-                            logger.debug(f"[FTP Dispatch] No new records to append for '{remote_path}'. Skipping..")
-                            continue
-                        
-                        logger.debug(f"[FTP Dispatch] Found {len(new_records)} new records. Appending...")
-                        
-                        final_records = {r.timestamp: r for r in existing_records}
-                    except error_perm:
-                        logger.debug(f"[FTP Dispatch] No existing file for '{remote_path}'. Creating new.")
-                    
-                    # Append new records to existing ones
-                    final_records.update(incoming_records)
-                    
-                    final_records = list(final_records.values())
-                    csv_file = create_csv_file(final_records, csv_header, timezone)
-                    ftp.put(csv_file, remote_path)
-                    latest_record = max(final_records, key=lambda r: r.timestamp)
-                    last_sent_obs_time = latest_record.timestamp
-                    uploaded += 1
+            for csv_file, remote_path in csv_files:
+                upload_csv_to_ftp(ftp, csv_file, remote_path)
+                uploaded += 1
+            
+            # Get the last timestamp from all processed records
+            if data_records:
+                timestamps = [make_aware_timestamp(d.get("timestamp"), channel.timezone) for d in data_records]
+                last_sent_obs_time = max(timestamps)
     
     finally:
         ftp.close()
     
-    logger.info(f"[FTP Dispatch] Uploaded {uploaded} file to {channel.name}")
+    logger.info(f"[FTP Dispatch] Uploaded {uploaded} files to {channel.name}")
     return uploaded, last_sent_obs_time

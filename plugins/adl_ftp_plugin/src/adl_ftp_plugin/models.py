@@ -1,16 +1,26 @@
+import logging
+
 from adl.core.models import DataParameter, Unit
 from adl.core.models import NetworkConnection, StationLink, DispatchChannel
+from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 from django.utils.translation import gettext_lazy as _
 from modelcluster.fields import ParentalKey
 from timezone_field import TimeZoneField
 from wagtail.admin.panels import MultiFieldPanel, FieldPanel, InlinePanel
 from wagtail.models import Orderable
 
-from adl_ftp_plugin.dispatchers.ftp import upload_to_ftp
+from adl_ftp_plugin.dispatchers.ftp import dispatch_to_ftp
+from adl_ftp_plugin.ftp import FTPClient
 from adl_ftp_plugin.utils import get_ftp_decoder_choices
 from adl_ftp_plugin.validators import validate_start_date
 from adl_ftp_plugin.widgets import FTPDirectoryTreeSelectWidget
+from .smartmet_utils import get_station_metadata_csv
+
+logger = logging.getLogger(__name__)
 
 
 class NetworkFTP(NetworkConnection):
@@ -226,7 +236,7 @@ class FTPStationDataFile(models.Model):
         return f"{self.station_link} - {self.file_name}"
 
 
-class FTPUpload(DispatchChannel):
+class BaseFTPUpload(DispatchChannel):
     WRITE_MODES = (
         ("append", _("Append record to single daily file")),
         ("new_file", _("Create a new file for each record")),
@@ -235,6 +245,7 @@ class FTPUpload(DispatchChannel):
     port = models.CharField(max_length=255, verbose_name=_("FTP Port"))
     user = models.CharField(max_length=255, verbose_name=_("FTP User"))
     password = models.CharField(max_length=255, verbose_name=_("FTP Password"))
+    passive = models.BooleanField(default=False, verbose_name=_("Use FTP Passive Mode"))
     directory = models.CharField(max_length=255, verbose_name=_("FTP Directory"),
                                  help_text=_("Directory on the FTP server to upload files to"))
     timezone = TimeZoneField(default='UTC', verbose_name=_("Timezone to use for date/time"),
@@ -243,23 +254,8 @@ class FTPUpload(DispatchChannel):
     write_mode = models.CharField(max_length=20, choices=WRITE_MODES, default="append",
                                   verbose_name=_("FTP Write Mode"))
     
-    panels = DispatchChannel.base_panels + [
-        MultiFieldPanel([
-            FieldPanel("host"),
-            FieldPanel("port"),
-            FieldPanel("user"),
-            FieldPanel("password"),
-            FieldPanel("directory"),
-            FieldPanel("write_mode"),
-        ], heading=_("FTP Configuration")),
-    ] + DispatchChannel.parameter_panels
-    
     class Meta:
-        verbose_name = _("FTP Upload")
-        verbose_name_plural = _("FTP Uploads")
-    
-    def send_station_data(self, station_link, station_data_records):
-        return upload_to_ftp(self, station_data_records)
+        abstract = True
     
     @property
     def connection_details(self):
@@ -268,4 +264,105 @@ class FTPUpload(DispatchChannel):
             "port": self.port,
             "user": self.user,
             "password": self.password,
+            "passive": self.passive,
         }
+
+
+class FTPUpload(BaseFTPUpload):
+    panels = DispatchChannel.base_panels + [
+        MultiFieldPanel([
+            FieldPanel("host"),
+            FieldPanel("port"),
+            FieldPanel("user"),
+            FieldPanel("password"),
+            FieldPanel("passive"),
+            FieldPanel("directory"),
+            FieldPanel("passive"),
+        ], heading=_("FTP Configuration")),
+    ] + DispatchChannel.parameter_panels
+    
+    class Meta:
+        verbose_name = _("Standard FTP Upload")
+        verbose_name_plural = _("Standard FTP Uploads")
+    
+    def send_station_data(self, station_link, station_data_records):
+        return dispatch_to_ftp(self, station_data_records)
+
+
+class SmartMetFTPUpload(BaseFTPUpload):
+    panels = DispatchChannel.base_panels + [
+        MultiFieldPanel([
+            FieldPanel("host"),
+            FieldPanel("port"),
+            FieldPanel("user"),
+            FieldPanel("password"),
+            FieldPanel("passive"),
+            FieldPanel("directory"),
+            FieldPanel("write_mode"),
+        ], heading=_("FTP Configuration")),
+    ] + DispatchChannel.parameter_panels
+    
+    class Meta:
+        verbose_name = _("SmartMet FTP Upload")
+    
+    @property
+    def smartmet_params(self):
+        SMARTMET_PARAMETER_NAMES = getattr(settings, "SMARTMET_PARAMETER_NAMES", [])
+        return SMARTMET_PARAMETER_NAMES
+    
+    def clean_parameter_mapping(self, parameter_mapping):
+        if parameter_mapping.channel_parameter not in self.smartmet_params:
+            message = "The provide channel parameter is not in the known list of parameters"
+            raise ValidationError(message)
+    
+    def get_parameter_mapping_values(self):
+        return smartmet_params
+    
+    def send_station_data(self, station_link, station_data_records):
+        return dispatch_to_ftp(self, station_data_records, create_station_dir=False, include_wigos_id=False,
+                               use_single_timestamp=True, include_header=False)
+    
+    def get_smartmet_metadata_csv(self):
+        metadata_csv = get_station_metadata_csv(self)
+        return metadata_csv
+    
+    def upload_stations_metadata(self):
+        csv_file = self.get_smartmet_metadata_csv()
+        
+        ftp_client = FTPClient(**self.connection_details)
+        
+        directory = self.directory
+        
+        remote_path = f"{directory}/stations.csv"
+        
+        logger.info(f"[SMARTMET METADATA] Uploading file to '{remote_path}'")
+        ftp_client.put(csv_file, remote_path)
+        
+        ftp_client.close()
+    
+    def after_update_station_links(self):
+        self.upload_stations_metadata()
+
+
+@receiver(post_save, sender=SmartMetFTPUpload)
+def upload_smartmet_metadata_on_save(sender, instance, created, **kwargs):
+    """
+    Signal handler that uploads station metadata CSV after SmartMetFTPUpload is saved.
+    """
+    try:
+        # Only upload if the instance is enabled
+        if not instance.enabled:
+            logger.debug(f"[SMARTMET METADATA] Skipping metadata upload for disabled channel: {instance.name}")
+            return
+        
+        # Check if FTP connection details are complete
+        if not all([instance.host, instance.user, instance.directory]):
+            logger.warning(f"[SMARTMET METADATA] Incomplete FTP configuration for channel: {instance.name}")
+            return
+        
+        logger.info(f"[SMARTMET METADATA] Starting metadata upload for channel: {instance.name}")
+        instance.upload_stations_metadata()
+        logger.info(f"[SMARTMET METADATA] Successfully uploaded metadata for channel: {instance.name}")
+    
+    except Exception as e:
+        logger.error(f"[SMARTMET METADATA] Failed to upload metadata for channel {instance.name}: {str(e)}")
