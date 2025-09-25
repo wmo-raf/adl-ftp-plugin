@@ -236,7 +236,7 @@ class FTPStationDataFile(models.Model):
         return f"{self.station_link} - {self.file_name}"
 
 
-class BaseFTPUpload(DispatchChannel):
+class BaseFTPUpload(models.Model):
     WRITE_MODES = (
         ("append", _("Append record to single daily file")),
         ("new_file", _("Create a new file for each record")),
@@ -268,7 +268,7 @@ class BaseFTPUpload(DispatchChannel):
         }
 
 
-class FTPUpload(BaseFTPUpload):
+class FTPUpload(BaseFTPUpload, DispatchChannel):
     panels = DispatchChannel.base_panels + [
         MultiFieldPanel([
             FieldPanel("host"),
@@ -289,7 +289,7 @@ class FTPUpload(BaseFTPUpload):
         return dispatch_to_ftp(self, station_data_records)
 
 
-class SmartMetFTPUpload(BaseFTPUpload):
+class SmartMetFTPUpload(BaseFTPUpload, DispatchChannel):
     panels = DispatchChannel.base_panels + [
         MultiFieldPanel([
             FieldPanel("host"),
@@ -304,6 +304,7 @@ class SmartMetFTPUpload(BaseFTPUpload):
     
     class Meta:
         verbose_name = _("SmartMet FTP Upload")
+        verbose_name_plural = _("SmartMet FTP Uploads")
     
     @property
     def smartmet_params(self):
