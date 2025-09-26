@@ -1,8 +1,10 @@
 import os
 import socket
 import stat
-from io import IOBase, BytesIO
 from datetime import datetime
+from io import IOBase, BytesIO
+
+from .utils import dotdict
 
 try:
     import paramiko
@@ -263,7 +265,7 @@ class SFTPClient:
         
         Args:
             remote: Remote directory path
-            extra: If True, return detailed file information
+            extra: If True, return detailed file information compatible with split_file_info format
             remove_relative_paths: If True, filter out '.' and '..' entries
             
         Returns:
@@ -271,19 +273,44 @@ class SFTPClient:
         """
         try:
             if extra:
-                # Get detailed listing
+                # Get detailed listing in split_file_info compatible format
                 directory_list = []
                 attrs_list = self.sftp.listdir_attr(remote)
                 
                 for attr in attrs_list:
-                    file_info = {
-                        'name': attr.filename,
+                    # Get file mode string
+                    mode_str = stat.filemode(attr.st_mode) if attr.st_mode else '-rwxrwxrwx'
+                    is_dir = stat.S_ISDIR(attr.st_mode) if attr.st_mode else False
+                    
+                    # Get datetime info
+                    if attr.st_mtime:
+                        dt_obj = datetime.fromtimestamp(attr.st_mtime)
+                        date_str = dt_obj.strftime('%b %d')
+                        time_str = dt_obj.strftime('%H:%M')
+                        year_str = dt_obj.strftime('%Y')
+                    else:
+                        dt_obj = datetime.now()
+                        date_str = dt_obj.strftime('%b %d')
+                        time_str = '00:00'
+                        year_str = dt_obj.strftime('%Y')
+                    
+                    file_info = dotdict({
+                        'directory': 'd' if is_dir else '-',
+                        'flags': mode_str,
+                        'perms': mode_str[1:],  # Remove first character (file type)
+                        'items': '1',
+                        'owner': str(attr.st_uid) if attr.st_uid else 'user',
+                        'group': str(attr.st_gid) if attr.st_gid else 'group',
                         'size': attr.st_size or 0,
-                        'permissions': stat.filemode(attr.st_mode) if attr.st_mode else '',
-                        'modified': datetime.fromtimestamp(attr.st_mtime) if attr.st_mtime else None,
-                        'is_dir': stat.S_ISDIR(attr.st_mode) if attr.st_mode else False,
+                        'date': date_str,
+                        'time': time_str,
+                        'year': year_str,
+                        'name': attr.filename,
+                        'datetime': dt_obj,
+                        # Additional SFTP-specific info
+                        'is_dir': is_dir,
                         'is_file': stat.S_ISREG(attr.st_mode) if attr.st_mode else False,
-                    }
+                    })
                     directory_list.append(file_info)
             else:
                 # Simple listing
