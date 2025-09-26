@@ -2,13 +2,14 @@ import csv
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from ftplib import error_perm
 from io import StringIO, BytesIO
 from typing import List, Dict, Tuple, Optional
 
 import pandas as pd
 
-from adl_ftp_plugin.ftp import FTPClient
+# Import both FTP and SFTP error types for compatibility
+from adl_ftp_plugin.ftp import FTPError
+from adl_ftp_plugin.ftp.sftp import SFTPError
 
 logger = logging.getLogger(__name__)
 
@@ -121,19 +122,19 @@ def create_csv_file(records: List[ObsRecord], header: List[str], timezone, inclu
     return BytesIO(output.getvalue().encode("utf-8"))
 
 
-# --- Simplified FTP Upload Logic ---
+# --- Simplified Upload Logic ---
 
-def upload_csv_to_ftp(ftp_client: FTPClient, csv_file: BytesIO, remote_path: str) -> None:
+def upload_csv_to_remote(client, csv_file: BytesIO, remote_path: str) -> None:
     """
-    Upload a single CSV file to FTP server.
+    Upload a single CSV file to remote server (FTP or SFTP).
     
     Args:
-        ftp_client: Connected FTP client
+        client: Connected FTP or SFTP client
         csv_file: CSV file as BytesIO object
         remote_path: Full remote path where file should be uploaded
     """
-    logger.debug(f"[FTP Upload] Uploading file to '{remote_path}'")
-    ftp_client.put(csv_file, remote_path)
+    logger.debug(f"[Remote Upload] Uploading file to '{remote_path}'")
+    client.put(csv_file, remote_path)
 
 
 def has_valid_data(values: dict) -> bool:
@@ -201,7 +202,7 @@ def prepare_csv_files_new_mode(
         if not has_valid_data(values):
             skipped_records += 1
             logger.debug(
-                f"[FTP Prepare] Skipping record for station {data.get('station_id')} - no valid channel parameter values")
+                f"[Remote Prepare] Skipping record for station {data.get('station_id')} - no valid channel parameter values")
             continue
         
         record = ObsRecord(
@@ -225,7 +226,7 @@ def prepare_csv_files_new_mode(
         csv_files.append((csv_file, remote_path))
     
     if skipped_records > 0:
-        logger.info(f"[FTP Prepare] Skipped {skipped_records} records with no valid channel parameter values")
+        logger.info(f"[Remote Prepare] Skipped {skipped_records} records with no valid channel parameter values")
     
     return csv_files
 
@@ -233,7 +234,7 @@ def prepare_csv_files_new_mode(
 def prepare_csv_files_append_mode(
         data_records: List[Dict],
         channel,
-        ftp_client: FTPClient,
+        client,
         create_station_dir: bool = True,
         include_wigos_id: bool = True,
         use_single_timestamp: bool = False,
@@ -280,7 +281,7 @@ def prepare_csv_files_append_mode(
         if not has_valid_data(values):
             skipped_records += 1
             logger.debug(
-                f"[FTP Prepare] Skipping record for station {d.get('station_id')} - no valid channel parameter values")
+                f"[Remote Prepare] Skipping record for station {d.get('station_id')} - no valid channel parameter values")
             continue
         
         valid_records.append(ObsRecord(
@@ -291,11 +292,11 @@ def prepare_csv_files_append_mode(
         ))
     
     if skipped_records > 0:
-        logger.info(f"[FTP Prepare] Skipped {skipped_records} records with no valid channel parameter values")
+        logger.info(f"[Remote Prepare] Skipped {skipped_records} records with no valid channel parameter values")
     
     # If no valid records remain, return empty list
     if not valid_records:
-        logger.info("[FTP Prepare] No valid records to process after filtering")
+        logger.info("[Remote Prepare] No valid records to process after filtering")
         return []
     
     # Group records by station and day
@@ -315,15 +316,15 @@ def prepare_csv_files_append_mode(
             final_records = {}
             
             try:
-                logger.debug(f"[FTP Prepare] Checking for existing file at '{remote_path}'")
-                existing_csv = ftp_client.get(remote_path)
+                logger.debug(f"[Remote Prepare] Checking for existing file at '{remote_path}'")
+                existing_csv = client.get(remote_path)
                 
-                logger.debug(f"[FTP Prepare] Found existing file at '{remote_path}'")
+                logger.debug(f"[Remote Prepare] Found existing file at '{remote_path}'")
                 
                 existing_records = csv_to_records(existing_csv, csv_header, channel_params, timezone)
                 existing_timestamps = {r.timestamp for r in existing_records}
                 
-                logger.debug(f"[FTP Prepare] Checking for new records to append for '{remote_path}'")
+                logger.debug(f"[Remote Prepare] Checking for new records to append for '{remote_path}'")
                 
                 # Check if we have new records to append
                 new_records = []
@@ -332,14 +333,16 @@ def prepare_csv_files_append_mode(
                         new_records.append(record)
                 
                 if not new_records:
-                    logger.debug(f"[FTP Prepare] No new records to append for '{remote_path}'. Skipping..")
+                    logger.debug(f"[Remote Prepare] No new records to append for '{remote_path}'. Skipping..")
                     continue
                 
-                logger.debug(f"[FTP Prepare] Found {len(new_records)} new records. Appending...")
+                logger.debug(f"[Remote Prepare] Found {len(new_records)} new records. Appending...")
                 
                 final_records = {r.timestamp: r for r in existing_records}
-            except error_perm:
-                logger.debug(f"[FTP Prepare] No existing file for '{remote_path}'. Creating new.")
+            except (FTPError, SFTPError, Exception) as e:
+                # Handle both FTP and SFTP errors, plus any other file-not-found scenarios
+                logger.debug(
+                    f"[Remote Prepare] No existing file for '{remote_path}' or error accessing it: {e}. Creating new.")
             
             # Append new records to existing ones
             final_records.update(incoming_records)
@@ -354,10 +357,11 @@ def prepare_csv_files_append_mode(
 def dispatch_to_ftp(channel, data_records: List[Dict], create_station_dir=True, include_wigos_id=True,
                     use_single_timestamp=False, include_header=True):
     """
-    Main dispatch function that coordinates CSV preparation and FTP upload.
+    Main dispatch function that coordinates CSV preparation and remote upload.
+    Works with both FTP and SFTP connections automatically based on channel configuration.
     
     Args:
-        channel: Channel configuration object
+        channel: Channel configuration object (supports both FTP and SFTP)
         data_records: List of data records to process
         create_station_dir: Whether to create station directories
         include_wigos_id: Whether to include wigos_id column in CSV files
@@ -365,19 +369,24 @@ def dispatch_to_ftp(channel, data_records: List[Dict], create_station_dir=True, 
                              If False, use separate 'date' and 'time' columns.
         include_header: Whether to include the header row in CSV files
     """
-    ftp = FTPClient(**channel.connection_details)
+    # Use the flexible client method that returns FTP or SFTP client based on configuration
+    client = channel.get_client()
     write_mode = channel.write_mode
     uploaded = 0
     last_sent_obs_time = None
     
+    # Log the connection type for debugging
+    connection_type = getattr(channel, 'connection_type', 'ftp')
+    logger.debug(f"[Remote Dispatch] Using {connection_type.upper()} connection for {channel.name}")
+    
     try:
         if write_mode == "new_file":
-            logger.debug(f"[FTP Dispatch] Creating new files for {len(data_records)} records")
+            logger.debug(f"[Remote Dispatch] Creating new files for {len(data_records)} records")
             csv_files = prepare_csv_files_new_mode(data_records, channel, create_station_dir, include_wigos_id,
                                                    use_single_timestamp, include_header)
             
             for csv_file, remote_path in csv_files:
-                upload_csv_to_ftp(ftp, csv_file, remote_path)
+                upload_csv_to_remote(client, csv_file, remote_path)
                 uploaded += 1
             
             # Get the last timestamp from the original records
@@ -386,12 +395,13 @@ def dispatch_to_ftp(channel, data_records: List[Dict], create_station_dir=True, 
                 last_sent_obs_time = max(timestamps)
         
         elif write_mode == "append":
-            logger.debug(f"[FTP Dispatch] Appending records to existing files")
-            csv_files = prepare_csv_files_append_mode(data_records, channel, ftp, create_station_dir, include_wigos_id,
+            logger.debug(f"[Remote Dispatch] Appending records to existing files")
+            csv_files = prepare_csv_files_append_mode(data_records, channel, client, create_station_dir,
+                                                      include_wigos_id,
                                                       use_single_timestamp, include_header)
             
             for csv_file, remote_path in csv_files:
-                upload_csv_to_ftp(ftp, csv_file, remote_path)
+                upload_csv_to_remote(client, csv_file, remote_path)
                 uploaded += 1
             
             # Get the last timestamp from all processed records
@@ -400,7 +410,7 @@ def dispatch_to_ftp(channel, data_records: List[Dict], create_station_dir=True, 
                 last_sent_obs_time = max(timestamps)
     
     finally:
-        ftp.close()
+        client.close()
     
-    logger.info(f"[FTP Dispatch] Uploaded {uploaded} files to {channel.name}")
+    logger.info(f"[Remote Dispatch] Uploaded {uploaded} files to {channel.name} via {connection_type.upper()}")
     return uploaded, last_sent_obs_time
