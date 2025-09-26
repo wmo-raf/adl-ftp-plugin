@@ -317,7 +317,7 @@ class SmartMetFTPUpload(BaseFTPUpload, DispatchChannel):
             raise ValidationError(message)
     
     def get_parameter_mapping_values(self):
-        return smartmet_params
+        return self.smartmet_params
     
     def send_station_data(self, station_link, station_data_records):
         return dispatch_to_ftp(self, station_data_records, create_station_dir=False, include_wigos_id=False,
