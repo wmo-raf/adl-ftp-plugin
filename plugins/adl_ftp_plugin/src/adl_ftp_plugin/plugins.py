@@ -53,7 +53,7 @@ class AdlFtpPlugin(Plugin):
         ftp_client = None
         
         try:
-            ftp_client = network_conn_ftp.get_ftp_client()
+            ftp_client = network_conn_ftp.get_client()
             
             # get the decoder from the registry
             decoder = self.get_decoder(decoder_name)

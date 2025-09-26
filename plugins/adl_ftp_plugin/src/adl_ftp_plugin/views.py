@@ -24,7 +24,7 @@ def get_ftp_connection_dir_list(request):
     
     ftp_client = None
     try:
-        ftp_client = connection.get_ftp_client()
+        ftp_client = connection.get_client()
         directories = get_ftp_dir_list(ftp_client, remote_path)
         ftp_client.close()
         return JsonResponse({"directories": directories}, status=200)
