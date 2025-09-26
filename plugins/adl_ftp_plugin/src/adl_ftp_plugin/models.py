@@ -270,7 +270,7 @@ class BaseFTPUpload(models.Model):
 
 class FTPUpload(BaseFTPUpload, DispatchChannel):
     panels = DispatchChannel.base_panels + [
-        # FieldPanel("timezone"),
+        FieldPanel("timezone"),
         MultiFieldPanel([
             FieldPanel("host"),
             FieldPanel("port"),
@@ -292,7 +292,7 @@ class FTPUpload(BaseFTPUpload, DispatchChannel):
 
 class SmartMetFTPUpload(BaseFTPUpload, DispatchChannel):
     panels = DispatchChannel.base_panels + [
-        # FieldPanel("timezone"),
+        FieldPanel("timezone"),
         MultiFieldPanel([
             FieldPanel("host"),
             FieldPanel("port"),
