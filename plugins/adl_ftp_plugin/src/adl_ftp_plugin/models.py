@@ -248,8 +248,8 @@ class BaseFTPUpload(models.Model):
     passive = models.BooleanField(default=False, verbose_name=_("Use FTP Passive Mode"))
     directory = models.CharField(max_length=255, verbose_name=_("FTP Directory"),
                                  help_text=_("Directory on the FTP server to upload files to"))
-    timezone = TimeZoneField(default='UTC', verbose_name=_("Timezone to use for date/time"),
-                             help_text=_("Timezone used by the station for recording observations"))
+    timezone = TimeZoneField(default='UTC', verbose_name=_("Timezone for output dates"),
+                             help_text=_("Timezone to use for file dates. UTC highly recommended"))
     
     write_mode = models.CharField(max_length=20, choices=WRITE_MODES, default="append",
                                   verbose_name=_("FTP Write Mode"))
@@ -270,6 +270,7 @@ class BaseFTPUpload(models.Model):
 
 class FTPUpload(BaseFTPUpload, DispatchChannel):
     panels = DispatchChannel.base_panels + [
+        FieldPanel("timezone"),
         MultiFieldPanel([
             FieldPanel("host"),
             FieldPanel("port"),
@@ -291,6 +292,7 @@ class FTPUpload(BaseFTPUpload, DispatchChannel):
 
 class SmartMetFTPUpload(BaseFTPUpload, DispatchChannel):
     panels = DispatchChannel.base_panels + [
+        FieldPanel("timezone"),
         MultiFieldPanel([
             FieldPanel("host"),
             FieldPanel("port"),
