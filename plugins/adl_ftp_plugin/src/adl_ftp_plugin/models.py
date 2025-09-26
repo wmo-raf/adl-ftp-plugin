@@ -75,6 +75,16 @@ class NetworkFTP(NetworkConnection):
         verbose_name=_("Host Key Policy"),
         help_text=_("How to handle unknown SSH host keys (SFTP only)")
     )
+    look_for_keys = models.BooleanField(
+        default=False,
+        verbose_name=_("Look for SSH Keys"),
+        help_text=_("Automatically search for SSH keys in default locations (~/.ssh/). SFTP only")
+    )
+    allow_agent = models.BooleanField(
+        default=False,
+        verbose_name=_("Allow SSH Agent"),
+        help_text=_("Use SSH agent for authentication if available. SFTP only")
+    )
     
     # Common settings
     timeout = models.IntegerField(default=20, verbose_name=_("Connection Timeout (seconds)"))
@@ -96,6 +106,8 @@ class NetworkFTP(NetworkConnection):
         MultiFieldPanel([
             FieldPanel("private_key_file"),
             FieldPanel("host_key_policy"),
+            FieldPanel("look_for_keys"),
+            FieldPanel("allow_agent"),
         ], heading=_("SFTP Settings")),
         FieldPanel("decoder"),
         InlinePanel("variable_mappings", label=_("Variable Mapping"), heading=_("Variable Mappings")),
@@ -157,6 +169,8 @@ class NetworkFTP(NetworkConnection):
             "user": self.username,
             "timeout": self.timeout,
             "host_key_policy": self.host_key_policy,
+            "look_for_keys": self.look_for_keys,
+            "allow_agent": self.allow_agent,
         }
         
         if self.password:
@@ -357,6 +371,8 @@ class BaseFTPUpload(models.Model):
         default=HostKeyPolicy.AUTO,
         verbose_name=_("Host Key Policy")
     )
+    look_for_keys = models.BooleanField(default=False, verbose_name=_("Look for SSH Keys"))
+    allow_agent = models.BooleanField(default=False, verbose_name=_("Allow SSH Agent"))
     
     directory = models.CharField(max_length=255, verbose_name=_("Remote Directory"),
                                  help_text=_("Directory on the server to upload files to"))
@@ -406,6 +422,8 @@ class BaseFTPUpload(models.Model):
                 "port": self.effective_port,
                 "user": self.user,
                 "host_key_policy": self.host_key_policy,
+                "look_for_keys": self.look_for_keys,
+                "allow_agent": self.allow_agent,
             }
             if self.password:
                 details["password"] = self.password
@@ -448,6 +466,8 @@ class FTPUpload(BaseFTPUpload, DispatchChannel):
         MultiFieldPanel([
             FieldPanel("private_key_file"),
             FieldPanel("host_key_policy"),
+            FieldPanel("look_for_keys"),
+            FieldPanel("allow_agent"),
         ], heading=_("SFTP Settings")),
     ] + DispatchChannel.parameter_panels
     

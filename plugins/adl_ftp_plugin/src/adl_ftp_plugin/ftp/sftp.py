@@ -40,7 +40,7 @@ class SFTPClient:
     relative_paths = {'.', '..'}
     
     def __init__(self, host, port=22, user=None, password=None, private_key=None,
-                 timeout=20, host_key_policy='auto', **kwargs):
+                 timeout=20, host_key_policy='auto', look_for_keys=False, allow_agent=False, **kwargs):
         """
         Initialize SFTP client
         
@@ -98,6 +98,8 @@ class SFTPClient:
                 password=password,
                 pkey=pkey,
                 timeout=timeout,
+                look_for_keys=look_for_keys,
+                allow_agent=allow_agent,
                 **kwargs
             )
             
