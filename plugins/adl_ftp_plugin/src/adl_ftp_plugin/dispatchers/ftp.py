@@ -136,6 +136,23 @@ def upload_csv_to_ftp(ftp_client: FTPClient, csv_file: BytesIO, remote_path: str
     ftp_client.put(csv_file, remote_path)
 
 
+def has_valid_data(values: dict) -> bool:
+    """
+    Check if the record has at least one non-empty, non-None channel parameter value.
+    
+    Args:
+        values: Dictionary of channel parameter values
+        
+    Returns:
+        True if at least one value is not None, not empty string, and not just whitespace
+    """
+    return any(
+        value is not None and
+        str(value).strip() != ""
+        for value in values.values()
+    )
+
+
 def prepare_csv_files_new_mode(
         data_records: List[Dict],
         channel,
@@ -147,6 +164,7 @@ def prepare_csv_files_new_mode(
     """
     Prepare CSV files for 'new_file' write mode.
     Each record becomes a separate CSV file.
+    Only creates files for records that have at least one valid channel parameter value.
     
     Args:
         include_wigos_id: Whether to include wigos_id column in CSV header
@@ -174,13 +192,23 @@ def prepare_csv_files_new_mode(
     csv_header.extend(channel_params)
     
     csv_files = []
+    skipped_records = 0
     
     for data in data_records:
+        values = extract_values(data, channel_params, from_root=False)
+        
+        # Skip records that don't have at least one valid channel parameter value
+        if not has_valid_data(values):
+            skipped_records += 1
+            logger.debug(
+                f"[FTP Prepare] Skipping record for station {data.get('station_id')} - no valid channel parameter values")
+            continue
+        
         record = ObsRecord(
             station_id=data.get("station_id"),
             wigos_id=data.get("wigos_id"),  # Can be None
             timestamp=make_aware_timestamp(data.get("timestamp"), timezone),
-            values=extract_values(data, channel_params, from_root=False)
+            values=values
         )
         
         csv_file = create_csv_file([record], csv_header, timezone, include_header)
@@ -195,6 +223,9 @@ def prepare_csv_files_new_mode(
             remote_path = f"{channel.directory}/{filename}"
         
         csv_files.append((csv_file, remote_path))
+    
+    if skipped_records > 0:
+        logger.info(f"[FTP Prepare] Skipped {skipped_records} records with no valid channel parameter values")
     
     return csv_files
 
@@ -211,6 +242,7 @@ def prepare_csv_files_append_mode(
     """
     Prepare CSV files for 'append' write mode.
     Groups records by station and day, merging with existing files if they exist.
+    Only processes records that have at least one valid channel parameter value.
     
     Args:
         include_wigos_id: Whether to include wigos_id column in CSV header
@@ -237,15 +269,37 @@ def prepare_csv_files_append_mode(
     
     csv_header.extend(channel_params)
     
-    # Group records by station and day
-    grouped = group_records_by_station_day([
-        ObsRecord(
+    # Filter and convert records, keeping only those with valid data
+    valid_records = []
+    skipped_records = 0
+    
+    for d in data_records:
+        values = extract_values(d, channel_params, from_root=False)
+        
+        # Skip records that don't have at least one valid channel parameter value
+        if not has_valid_data(values):
+            skipped_records += 1
+            logger.debug(
+                f"[FTP Prepare] Skipping record for station {d.get('station_id')} - no valid channel parameter values")
+            continue
+        
+        valid_records.append(ObsRecord(
             station_id=d.get("station_id"),
             wigos_id=d.get("wigos_id"),  # Can be None
             timestamp=make_aware_timestamp(d.get("timestamp"), timezone),
-            values=extract_values(d, channel_params, from_root=False))
-        for d in data_records
-    ])
+            values=values
+        ))
+    
+    if skipped_records > 0:
+        logger.info(f"[FTP Prepare] Skipped {skipped_records} records with no valid channel parameter values")
+    
+    # If no valid records remain, return empty list
+    if not valid_records:
+        logger.info("[FTP Prepare] No valid records to process after filtering")
+        return []
+    
+    # Group records by station and day
+    grouped = group_records_by_station_day(valid_records)
     
     csv_files = []
     
