@@ -360,7 +360,7 @@ class BaseFTPUpload(models.Model):
     password = models.CharField(max_length=255, verbose_name=_("Password"), blank=True)
     
     # FTP specific
-    passive = models.BooleanField(default=False, verbose_name=_("Use FTP Passive Mode"))
+    passive = models.BooleanField(default=True, verbose_name=_("Use FTP Passive Mode"))
     secure = models.BooleanField(default=False, verbose_name=_("Secure (FTPS)"))
     
     # SFTP specific
