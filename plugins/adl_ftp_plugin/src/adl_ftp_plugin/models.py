@@ -450,8 +450,8 @@ class BaseFTPUpload(models.Model):
 
 class FTPUpload(BaseFTPUpload, DispatchChannel):
     panels = DispatchChannel.base_panels + [
-        FieldPanel("connection_type"),
         FieldPanel("timezone"),
+        FieldPanel("connection_type"),
         MultiFieldPanel([
             FieldPanel("host"),
             FieldPanel("port"),
@@ -469,6 +469,7 @@ class FTPUpload(BaseFTPUpload, DispatchChannel):
             FieldPanel("look_for_keys"),
             FieldPanel("allow_agent"),
         ], heading=_("SFTP Settings")),
+        FieldPanel("write_mode"),
     ] + DispatchChannel.parameter_panels
     
     class Meta:
