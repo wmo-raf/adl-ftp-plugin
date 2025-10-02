@@ -13,6 +13,7 @@ class PluginNameConfig(AppConfig):
         
         plugin_registry.register(AdlFtpPlugin())
         
-        from .decoders import Toa5Decoder, SiapMicrosDecoder
+        from .decoders import Toa5Decoder, SiapMicrosDecoder, StandardCSVDecoder
+        ftp_decoder_registry.register(StandardCSVDecoder())
         ftp_decoder_registry.register(Toa5Decoder())
         ftp_decoder_registry.register(SiapMicrosDecoder())

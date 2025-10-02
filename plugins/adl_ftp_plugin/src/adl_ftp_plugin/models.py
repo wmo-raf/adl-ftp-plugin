@@ -1,5 +1,4 @@
 import logging
-from enum import Enum
 
 from adl.core.models import DataParameter, Unit
 from adl.core.models import NetworkConnection, StationLink, DispatchChannel
@@ -8,6 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from modelcluster.fields import ParentalKey
 from timezone_field import TimeZoneField
@@ -19,8 +19,13 @@ from adl_ftp_plugin.ftp import FTPClient
 from adl_ftp_plugin.ftp.sftp import SFTPClient
 from adl_ftp_plugin.utils import get_ftp_decoder_choices
 from adl_ftp_plugin.validators import validate_start_date
-from adl_ftp_plugin.widgets import FTPDirectoryTreeSelectWidget
 from .smartmet_utils import get_station_metadata_csv
+from .widgets import (
+    ConnectionTypeRadioSelect,
+    ConditionalRadioSelect,
+    FTPDirectoryTreeSelectWidget,
+    FTPDecoderSelectWidget
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +42,206 @@ class HostKeyPolicy(models.TextChoices):
     AUTO = 'auto', _('Auto-accept (less secure)')
     WARN = 'warn', _('Warn but connect')
     REJECT = 'reject', _('Reject unknown hosts (most secure)')
+
+
+class StandardCSVConfig(models.Model):
+    """Configuration for standard CSV file format"""
+    
+    DATETIME_MODE_CHOICES = [
+        ("single", _("Single datetime column")),
+        ("separate", _("Separate date and time columns")),
+    ]
+    
+    # Common datetime format choices
+    DATETIME_FORMAT_CHOICES = [
+        ("%Y-%m-%d %H:%M:%S", "2025-01-15 14:30:45 (YYYY-MM-DD HH:MM:SS - ISO 8601)"),
+        ("%Y-%m-%d %H:%M:%S.%f", "2025-01-15 14:30:45.123456 (with microseconds)"),
+        ("%Y-%m-%dT%H:%M:%S", "2025-01-15T14:30:45 (ISO 8601 with T separator)"),
+        ("%Y-%m-%dT%H:%M:%SZ", "2025-01-15T14:30:45Z (ISO 8601 UTC)"),
+        ("%Y-%m-%d %H:%M", "2025-01-15 14:30 (YYYY-MM-DD HH:MM - no seconds)"),
+        ("%d/%m/%Y %H:%M:%S", "15/01/2025 14:30:45 (DD/MM/YYYY HH:MM:SS)"),
+        ("%d/%m/%Y %H:%M", "15/01/2025 14:30 (DD/MM/YYYY HH:MM - no seconds)"),
+        ("%m/%d/%Y %H:%M:%S", "01/15/2025 14:30:45 (MM/DD/YYYY HH:MM:SS)"),
+        ("%m/%d/%Y %H:%M", "01/15/2025 14:30 (MM/DD/YYYY HH:MM - no seconds)"),
+        ("%d-%m-%Y %H:%M:%S", "15-01-2025 14:30:45 (DD-MM-YYYY HH:MM:SS)"),
+        ("%m-%d-%Y %H:%M:%S", "01-15-2025 14:30:45 (MM-DD-YYYY HH:MM:SS)"),
+        ("%Y%m%d%H%M%S", "20250115143045 (YYYYMMDDHHMMSS - compact)"),
+        ("%Y%m%d %H%M%S", "20250115 143045 (YYYYMMDD HHMMSS - compact with space)"),
+        ("%d.%m.%Y %H:%M:%S", "15.01.2025 14:30:45 (DD.MM.YYYY HH:MM:SS)"),
+        ("%d.%m.%Y %H:%M", "15.01.2025 14:30 (DD.MM.YYYY HH:MM - no seconds)"),
+        ("%Y/%m/%d %H:%M:%S", "2025/01/15 14:30:45 (YYYY/MM/DD HH:MM:SS)"),
+        ("%d %b %Y %H:%M:%S", "15 Jan 2025 14:30:45 (DD Mon YYYY HH:MM:SS)"),
+        ("%d %B %Y %H:%M:%S", "15 January 2025 14:30:45 (DD Month YYYY HH:MM:SS)"),
+        ("%Y-%m-%d %I:%M:%S %p", "2025-01-15 02:30:45 PM (YYYY-MM-DD 12-hour with AM/PM)"),
+        ("%m/%d/%Y %I:%M:%S %p", "01/15/2025 02:30:45 PM (MM/DD/YYYY 12-hour with AM/PM)"),
+        ("%d/%m/%Y %I:%M:%S %p", "15/01/2025 02:30:45 PM (DD/MM/YYYY 12-hour with AM/PM)"),
+        ("%a, %d %b %Y %H:%M:%S", "Wed, 15 Jan 2025 14:30:45 (RFC 2822)"),
+    ]
+    
+    # Common date format choices
+    DATE_FORMAT_CHOICES = [
+        ("%Y-%m-%d", "2025-01-15 (YYYY-MM-DD - ISO 8601)"),
+        ("%d/%m/%Y", "15/01/2025 (DD/MM/YYYY)"),
+        ("%m/%d/%Y", "01/15/2025 (MM/DD/YYYY)"),
+        ("%d-%m-%Y", "15-01-2025 (DD-MM-YYYY)"),
+        ("%m-%d-%Y", "01-15-2025 (MM-DD-YYYY)"),
+        ("%Y/%m/%d", "2025/01/15 (YYYY/MM/DD)"),
+        ("%d.%m.%Y", "15.01.2025 (DD.MM.YYYY)"),
+        ("%Y%m%d", "20250115 (YYYYMMDD - compact)"),
+        ("%d %b %Y", "15 Jan 2025 (DD Mon YYYY - abbreviated month)"),
+        ("%d %B %Y", "15 January 2025 (DD Month YYYY - full month)"),
+        ("%b %d, %Y", "Jan 15, 2025 (Mon DD, YYYY)"),
+        ("%B %d, %Y", "January 15, 2025 (Month DD, YYYY)"),
+        ("%d-%b-%Y", "15-Jan-2025 (DD-Mon-YYYY)"),
+        ("%Y.%m.%d", "2025.01.15 (YYYY.MM.DD)"),
+        ("%d/%m/%y", "15/01/25 (DD/MM/YY - 2-digit year)"),
+        ("%m/%d/%y", "01/15/25 (MM/DD/YY - 2-digit year)"),
+        ("%y-%m-%d", "25-01-15 (YY-MM-DD - 2-digit year)"),
+        ("%y%m%d", "250115 (YYMMDD - compact 2-digit year)"),
+    ]
+    
+    # Common time format choices
+    TIME_FORMAT_CHOICES = [
+        ("%H:%M:%S", "14:30:45 (HH:MM:SS - 24-hour with seconds)"),
+        ("%H:%M", "14:30 (HH:MM - 24-hour without seconds)"),
+        ("%H:%M:%S.%f", "14:30:45.123456 (HH:MM:SS.microseconds)"),
+        ("%I:%M:%S %p", "02:30:45 PM (12-hour with AM/PM and seconds)"),
+        ("%I:%M %p", "02:30 PM (12-hour with AM/PM, no seconds)"),
+        ("%H%M%S", "143045 (HHMMSS - compact 24-hour)"),
+        ("%H%M", "1430 (HHMM - compact 24-hour, no seconds)"),
+        ("%I:%M:%S%p", "02:30:45PM (12-hour, no space before AM/PM)"),
+        ("%I:%M%p", "02:30PM (12-hour, no seconds, no space)"),
+        ("%H.%M.%S", "14.30.45 (HH.MM.SS - dot separator)"),
+        ("%H.%M", "14.30 (HH.MM - dot separator, no seconds)"),
+    ]
+    
+    DELIMITER_CHOICES = [
+        (",", "Comma (,)"),
+        ("\t", "Tab (\\t)"),
+        (";", "Semicolon (;)"),
+        ("|", "Pipe (|)"),
+        (" ", "Space ( )"),
+        (":", "Colon (:)"),
+    ]
+    
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("Created At"))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("Updated At"))
+    
+    name = models.CharField(max_length=255, verbose_name=_("Configuration Name"),
+                            help_text=_("A descriptive name for this CSV configuration"))
+    
+    # Datetime configuration
+    datetime_mode = models.CharField(
+        max_length=20,
+        choices=DATETIME_MODE_CHOICES,
+        default="single",
+        verbose_name=_("Datetime Mode"),
+        help_text=_("Whether datetime is in one column or split into date and time columns")
+    )
+    
+    # Single column mode
+    datetime_column = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name=_("Datetime Column Name"),
+        help_text=_("Name of the column containing datetime (for single column mode)")
+    )
+    datetime_format = models.CharField(
+        max_length=255,
+        blank=True,
+        choices=DATETIME_FORMAT_CHOICES,
+        default="%Y-%m-%d %H:%M:%S",
+        verbose_name=_("Datetime Format"),
+        help_text=_("Select the format that matches your datetime column")
+    )
+    
+    # Separate columns mode
+    date_column = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name=_("Date Column Name"),
+        help_text=_("Name of the column containing date (for separate columns mode)")
+    )
+    date_format = models.CharField(
+        max_length=255,
+        blank=True,
+        choices=DATE_FORMAT_CHOICES,
+        default="%Y-%m-%d",
+        verbose_name=_("Date Format"),
+        help_text=_("Select the format that matches your date column")
+    )
+    time_column = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name=_("Time Column Name"),
+        help_text=_("Name of the column containing time (for separate columns mode)")
+    )
+    time_format = models.CharField(
+        max_length=255,
+        blank=True,
+        choices=TIME_FORMAT_CHOICES,
+        default="%H:%M:%S",
+        verbose_name=_("Time Format"),
+        help_text=_("Select the format that matches your time column")
+    )
+    
+    # CSV parsing options
+    delimiter = models.CharField(
+        max_length=5,
+        choices=DELIMITER_CHOICES,
+        default=",",
+        verbose_name=_("CSV Delimiter"),
+        help_text=_("Character used to separate values")
+    )
+    skip_rows = models.IntegerField(
+        default=0,
+        verbose_name=_("Skip Rows"),
+        help_text=_("Number of rows to skip before the header row")
+    )
+    
+    panels = [
+        FieldPanel("name"),
+        MultiFieldPanel([
+            FieldPanel("datetime_mode", widget=ConditionalRadioSelect),
+        ], heading=_("Datetime Configuration")),
+        MultiFieldPanel([
+            FieldPanel("datetime_column"),
+            FieldPanel("datetime_format"),
+        ], heading=_("Single Column Mode Settings")),
+        MultiFieldPanel([
+            FieldPanel("date_column"),
+            FieldPanel("date_format"),
+            FieldPanel("time_column"),
+            FieldPanel("time_format"),
+        ], heading=_("Separate Columns Mode Settings")),
+        MultiFieldPanel([
+            FieldPanel("delimiter"),
+            FieldPanel("skip_rows"),
+        ], heading=_("Additional Settings")),
+    ]
+    
+    class Meta:
+        verbose_name = _("CSV Decoder Configuration")
+        verbose_name_plural = _("CSV Decoder Configurations")
+    
+    def __str__(self):
+        return self.name
+    
+    def clean(self):
+        """Validate configuration based on datetime mode"""
+        super().clean()
+        
+        if self.datetime_mode == "single":
+            if not self.datetime_column:
+                raise ValidationError({
+                    'datetime_column': _("Datetime column name is required for single column mode")
+                })
+        elif self.datetime_mode == "separate":
+            if not self.date_column or not self.time_column:
+                raise ValidationError({
+                    'date_column': _("Date column name is required for separate columns mode"),
+                    'time_column': _("Time column name is required for separate columns mode")
+                })
 
 
 class NetworkFTP(NetworkConnection):
@@ -90,8 +295,17 @@ class NetworkFTP(NetworkConnection):
     timeout = models.IntegerField(default=20, verbose_name=_("Connection Timeout (seconds)"))
     decoder = models.CharField(max_length=255, choices=get_ftp_decoder_choices, verbose_name=_("Decoder"))
     
+    csv_config = models.ForeignKey(
+        StandardCSVConfig,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name=_("CSV Configuration"),
+        help_text=_("Configuration for standard CSV files")
+    )
+    
     panels = NetworkConnection.panels + [
-        FieldPanel("connection_type"),
+        FieldPanel("connection_type", widget=ConnectionTypeRadioSelect),
         MultiFieldPanel([
             FieldPanel("host"),
             FieldPanel("port"),
@@ -109,13 +323,18 @@ class NetworkFTP(NetworkConnection):
             FieldPanel("look_for_keys"),
             FieldPanel("allow_agent"),
         ], heading=_("SFTP Settings")),
-        FieldPanel("decoder"),
+        FieldPanel("decoder", widget=FTPDecoderSelectWidget),
+        FieldPanel("csv_config"),
         InlinePanel("variable_mappings", label=_("Variable Mapping"), heading=_("Variable Mappings")),
     ]
     
     class Meta:
         verbose_name = _("Network FTP/SFTP")
         verbose_name_plural = _("Network FTP/SFTPs")
+    
+    def get_decoder(self):
+        from adl_ftp_plugin.registries import ftp_decoder_registry
+        return ftp_decoder_registry.get(self.decoder)
     
     def clean(self):
         """Validate connection settings based on connection type"""
@@ -131,6 +350,38 @@ class NetworkFTP(NetworkConnection):
                 raise ValidationError({
                     'password': _("Password is required for FTP/FTPS connections")
                 })
+        
+        # Validate decoder-specific requirements
+        if self.decoder == "standard_csv":
+            if not self.csv_config:
+                raise ValidationError({
+                    'csv_config': _("CSV Configuration is required when using 'Standard CSV' decoder")
+                })
+    
+    def get_extra_model_admin_links(self):
+        from .viewsets import StandardCSVConfigViewSet, TestDecoderConfigViewSet
+        url = TestDecoderConfigViewSet().menu_url
+        url = f"{url}?connection_id={self.id}"
+        
+        columns = [
+            {
+                "label": _("Test Decoder Configuration"),
+                "url": url,
+                "icon_name": "glasses",
+                "kwargs": {"attrs": {"target": "_blank"}}
+            }
+        ]
+        
+        if self.decoder == "standard_csv" and self.csv_config:
+            url = reverse(StandardCSVConfigViewSet().get_url_name("edit"), args=[self.csv_config.id])
+            columns.append({
+                "label": _("CSV Config"),
+                "url": url,
+                "icon_name": "doc-full",
+                "kwargs": {"attrs": {"target": "_blank"}}
+            })
+        
+        return columns
     
     @property
     def default_port(self):

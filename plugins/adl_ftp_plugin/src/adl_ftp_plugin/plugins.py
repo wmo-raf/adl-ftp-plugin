@@ -62,6 +62,12 @@ class AdlFtpPlugin(Plugin):
                 logger.error(f"[ADL_FTP_PLUGIN] Decoder {decoder_name} not found in decoder registry.")
                 return
             
+            if decoder_name == "standard_csv":
+                if not network_conn_ftp.csv_config:
+                    logger.error(f"[ADL_FTP_PLUGIN] Standard CSV decoder selected but no CSV configuration set.")
+                    return
+                decoder._config = network_conn_ftp.csv_config
+            
             net_ftp_name = network_conn_ftp.network.name
             timezone = station_link.timezone
             station_name = station_link.station.name
