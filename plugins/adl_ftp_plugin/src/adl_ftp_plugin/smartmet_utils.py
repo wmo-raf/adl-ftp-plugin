@@ -29,12 +29,12 @@ def get_station_metadata_csv(dispatch_channel) -> BytesIO:
         longitude = station.location.x if station.location else ""
         latitude = station.location.y if station.location else ""
         
-        # Use WMO station number if available, otherwise fall back to station_id
-        station_number = station.wmo_station_number or station.station_id
+        # Us PK station id as station number
+        station_number = station.id
         
-        # Write the row: station_id,station_number,longitude,latitude,name
+        # Write the row: station_number,station_number,longitude,latitude,name
         writer.writerow([
-            station.station_id,
+            station_number,
             station_number,
             longitude,
             latitude,
