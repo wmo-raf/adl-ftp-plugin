@@ -483,9 +483,70 @@ class FTPStationLink(StationLink):
         ("f", _("Month, textual, full, lowercase. 'january'")),
     ]
     
+    FILENAME_DATE_FORMAT_CHOICES = [
+        # Compact formats (no separators)
+        ("YYYYMMDD", _("YYYYMMDD - e.g., 20250115")),
+        ("YYYYMMDDHH", _("YYYYMMDDHH - e.g., 2025011514")),
+        ("YYYYMMDDHHMM", _("YYYYMMDDHHMM - e.g., 202501151430")),
+        ("YYYYMMDDHHMMSS", _("YYYYMMDDHHMMSS - e.g., 20250115143045")),
+        ("YYMMDD", _("YYMMDD - e.g., 250115")),
+        ("YYMMDDHHMM", _("YYMMDDHHMM - e.g., 2501151430")),
+        ("DDMMYYYY", _("DDMMYYYY - e.g., 15012025")),
+        ("MMDDYYYY", _("MMDDYYYY - e.g., 01152025")),
+        ("DDMMYY", _("DDMMYY - e.g., 150125")),
+        ("MMDDYY", _("MMDDYY - e.g., 011525")),
+        
+        # Dash separated
+        ("YYYY-MM-DD", _("YYYY-MM-DD - e.g., 2025-01-15")),
+        ("YYYY-MM-DD-HH", _("YYYY-MM-DD-HH - e.g., 2025-01-15-14")),
+        ("YYYY-MM-DD-HHMM", _("YYYY-MM-DD-HHMM - e.g., 2025-01-15-1430")),
+        ("YYYY-MM-DD-HHMMSS", _("YYYY-MM-DD-HHMMSS - e.g., 2025-01-15-143045")),
+        ("DD-MM-YYYY", _("DD-MM-YYYY - e.g., 15-01-2025")),
+        ("MM-DD-YYYY", _("MM-DD-YYYY - e.g., 01-15-2025")),
+        ("YY-MM-DD", _("YY-MM-DD - e.g., 25-01-15")),
+        
+        # Underscore separated
+        ("YYYY_MM_DD", _("YYYY_MM_DD - e.g., 2025_01_15")),
+        ("YYYY_MM_DD_HH", _("YYYY_MM_DD_HH - e.g., 2025_01_15_14")),
+        ("YYYY_MM_DD_HHMM", _("YYYY_MM_DD_HHMM - e.g., 2025_01_15_1430")),
+        ("YYYY_MM_DD_HHMMSS", _("YYYY_MM_DD_HHMMSS - e.g., 2025_01_15_143045")),
+        ("DD_MM_YYYY", _("DD_MM_YYYY - e.g., 15_01_2025")),
+        ("MM_DD_YYYY", _("MM_DD_YYYY - e.g., 01_15_2025")),
+        
+        # Dot separated
+        ("YYYY.MM.DD", _("YYYY.MM.DD - e.g., 2025.01.15")),
+        ("DD.MM.YYYY", _("DD.MM.YYYY - e.g., 15.01.2025")),
+        ("MM.DD.YYYY", _("MM.DD.YYYY - e.g., 01.15.2025")),
+        
+        # ISO 8601 / RFC 3339 variants
+        ("YYYY-MM-DDTHH", _("YYYY-MM-DDTHH - e.g., 2025-01-15T14")),
+        ("YYYY-MM-DDTHHMMSS", _("YYYY-MM-DDTHHMMSS - e.g., 2025-01-15T143045")),
+        ("YYYY-MM-DDTHH:MM:SS", _("YYYY-MM-DDTHH:MM:SS - e.g., 2025-01-15T14:30:45")),
+        
+        # Julian date formats
+        ("YYYYDDD", _("YYYYDDD - e.g., 2025015 (Julian day)")),
+        ("YYDDD", _("YYDDD - e.g., 25015 (Julian day)")),
+        
+        # Year and month only
+        ("YYYYMM", _("YYYYMM - e.g., 202501")),
+        ("YYYY-MM", _("YYYY-MM - e.g., 2025-01")),
+        ("YYYY_MM", _("YYYY_MM - e.g., 2025_01")),
+        
+        # Text month formats
+        ("YYYY-MMM-DD", _("YYYY-MMM-DD - e.g., 2025-Jan-15")),
+        ("DD-MMM-YYYY", _("DD-MMM-YYYY - e.g., 15-Jan-2025")),
+        ("YYYYMMMDD", _("YYYYMMMDD - e.g., 2025Jan15")),
+        ("DDMMMYYYY", _("DDMMMYYYY - e.g., 15Jan2025")),
+        
+        # Unix timestamp
+        ("TIMESTAMP", _("Unix Timestamp - e.g., 1705329600")),
+    ]
+    
     ftp_path = models.CharField(max_length=255, verbose_name=_("Remote Path"),
                                 help_text=_("Path to the directory containing the data files"))
     file_pattern = models.CharField(max_length=255, verbose_name=_("File Pattern"))
+    
+    # Directory structure by date
     dir_structured_by_date = models.BooleanField(default=False, verbose_name=_("Directory Structured by Date ?"),
                                                  help_text=_("Check if the files are structured by a combination of"
                                                              " year, month, day or hour in the remote path. Folders "
@@ -497,6 +558,22 @@ class FTPStationLink(StationLink):
                                                     "This will be used to construct the final name of the folder in the remote path"))
     month_dir_format = models.CharField(max_length=255, blank=True, null=True, choices=MONTH_FORMAT_CHOICES,
                                         default="m", verbose_name=_("Month directory Format"), )
+    
+    # Filename date filtering
+    filter_files_by_date = models.BooleanField(
+        default=False,
+        verbose_name=_("Filter files by date in filename"),
+        help_text=_("Check if filenames contain dates that should be used to filter which files to download")
+    )
+    filename_date_format = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        choices=FILENAME_DATE_FORMAT_CHOICES,
+        verbose_name=_("Filename Date Format"),
+        help_text=_("Format of the date in the filename (appears before file extension)")
+    )
+    
     start_date = models.DateTimeField(blank=True, null=True, validators=[validate_start_date],
                                       verbose_name=_("Start Date"),
                                       help_text=_("Start date for data pulling. Select a past date to include the "
@@ -519,7 +596,11 @@ class FTPStationLink(StationLink):
             FieldPanel("dir_structured_by_date"),
             FieldPanel("date_granularity"),
             FieldPanel("month_dir_format"),
-        ], heading=_("File Structure")),
+        ], heading=_("Directory Structure")),
+        MultiFieldPanel([
+            FieldPanel("filter_files_by_date"),
+            FieldPanel("filename_date_format"),
+        ], heading=_("Filename Date Filtering")),
         MultiFieldPanel([
             FieldPanel("start_date"),
             FieldPanel("skip_already_downloaded_files"),
@@ -535,6 +616,15 @@ class FTPStationLink(StationLink):
     
     def __str__(self):
         return f"{self.network_connection} - {self.station.wigos_id} - {self.station}"
+    
+    def clean(self):
+        """Validate configuration"""
+        super().clean()
+        
+        if self.filter_files_by_date and not self.filename_date_format:
+            raise ValidationError({
+                'filename_date_format': _("Filename date format is required when filtering files by date")
+            })
     
     def get_variable_mappings(self):
         """Returns the variable mappings for this station link."""

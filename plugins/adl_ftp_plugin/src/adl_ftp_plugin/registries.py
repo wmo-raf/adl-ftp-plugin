@@ -1,8 +1,9 @@
 import fnmatch
 
+from adl.core.registry import Registry, Instance
 from django.core.exceptions import ImproperlyConfigured
 
-from adl.core.registry import Registry, Instance
+from .ftp.ftp_utils import filter_files_by_date_range
 
 
 class FTPDecoder(Instance):
@@ -40,12 +41,14 @@ class FTPDecoder(Instance):
     
     def get_matching_files(self, station_link, files, start_date=None, end_date=None):
         """
-        Returns a list of files that match the decoder.
+        Returns a list of files that match the decoder and date range.
 
         :param station_link: The station link that is used to collect the data.
         :type station_link: adl_ftp_plugin.models.FTPStationLink
         :param files: The list of files that should be checked.
         :type files: list[str]
+        :param start_date: Start date for filtering
+        :param end_date: End date for filtering
         :return: The list of matching files.
         :rtype: list[str]
         """
@@ -53,6 +56,16 @@ class FTPDecoder(Instance):
         
         # Filter files by pattern
         matching_files = [file for file in files if fnmatch.fnmatch(file, pattern)]
+        
+        # If filename date filtering is enabled, filter by date
+        if station_link.filter_files_by_date and station_link.filename_date_format:
+            matching_files = filter_files_by_date_range(
+                matching_files,
+                station_link.filename_date_format,
+                start_date,
+                end_date,
+                tz=station_link.timezone
+            )
         
         return matching_files
 
