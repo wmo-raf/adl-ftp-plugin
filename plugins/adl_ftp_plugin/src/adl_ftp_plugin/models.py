@@ -132,6 +132,14 @@ class StandardCSVConfig(models.Model):
     name = models.CharField(max_length=255, verbose_name=_("Configuration Name"),
                             help_text=_("A descriptive name for this CSV configuration"))
     
+    # CSV structure
+    has_header = models.BooleanField(
+        default=True,
+        verbose_name=_("File has header row"),
+        help_text=_("Check if the first row (after skipped rows) contains column names. "
+                    "If unchecked, columns will be named as column_1, column_2, etc.")
+    )
+    
     # Datetime configuration
     datetime_mode = models.CharField(
         max_length=20,
@@ -204,6 +212,11 @@ class StandardCSVConfig(models.Model):
     panels = [
         FieldPanel("name"),
         MultiFieldPanel([
+            FieldPanel("has_header"),
+            FieldPanel("delimiter"),
+            FieldPanel("skip_rows"),
+        ], heading=_("CSV Structure")),
+        MultiFieldPanel([
             FieldPanel("datetime_mode", widget=ConditionalRadioSelect),
         ], heading=_("Datetime Configuration")),
         MultiFieldPanel([
@@ -216,10 +229,6 @@ class StandardCSVConfig(models.Model):
             FieldPanel("time_column"),
             FieldPanel("time_format"),
         ], heading=_("Separate Columns Mode Settings")),
-        MultiFieldPanel([
-            FieldPanel("delimiter"),
-            FieldPanel("skip_rows"),
-        ], heading=_("Additional Settings")),
     ]
     
     class Meta:

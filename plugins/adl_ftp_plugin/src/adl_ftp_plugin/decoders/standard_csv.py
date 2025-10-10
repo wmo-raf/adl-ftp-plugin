@@ -46,27 +46,63 @@ class StandardCSVDecoder(FTPDecoder):
                     logger.warning(f"Attempted to skip {config.skip_rows} rows but file has fewer rows")
                     return data
             
-            # Read header
-            try:
-                header = next(reader)
-            except StopIteration:
-                logger.warning("CSV file is empty or has no header")
-                return data
+            # Read or generate header
+            first_row = None
+            if config.has_header:
+                # Read header from file
+                try:
+                    header = next(reader)
+                except StopIteration:
+                    logger.warning("CSV file is empty or has no data after skipped rows")
+                    return data
+            else:
+                # No header - peek at first data row to determine number of columns
+                try:
+                    first_row = next(reader)
+                    num_columns = len(first_row)
+                    # Generate column names: column_1, column_2, etc.
+                    header = [f"column_{i + 1}" for i in range(num_columns)]
+                    logger.debug(f"Generated header for headerless CSV: {header}")
+                except StopIteration:
+                    logger.warning("CSV file is empty")
+                    return data
             
             # Validate required columns exist
             self._validate_columns(header, config)
             
             # Process data rows
-            for line_num, line in enumerate(reader, start=config.skip_rows + 2):
+            if config.has_header:
+                # Normal processing - all data rows are after header
+                for line_num, line in enumerate(reader, start=config.skip_rows + 2):
+                    try:
+                        record = self._parse_row(header, line, config)
+                        if record:
+                            data["values"].append(record)
+                    except Exception as e:
+                        logger.warning(
+                            f"Error parsing CSV row {line_num}: {e}. Skipping row."
+                        )
+                        continue
+            else:
+                # No header - process first row that was already read
                 try:
-                    record = self._parse_row(header, line, config)
+                    record = self._parse_row(header, first_row, config)
                     if record:
                         data["values"].append(record)
                 except Exception as e:
-                    logger.warning(
-                        f"Error parsing CSV row {line_num}: {e}. Skipping row."
-                    )
-                    continue
+                    logger.warning(f"Error parsing CSV first row: {e}. Skipping row.")
+                
+                # Process remaining rows
+                for line_num, line in enumerate(reader, start=config.skip_rows + 2):
+                    try:
+                        record = self._parse_row(header, line, config)
+                        if record:
+                            data["values"].append(record)
+                    except Exception as e:
+                        logger.warning(
+                            f"Error parsing CSV row {line_num}: {e}. Skipping row."
+                        )
+                        continue
         
         return data
     
@@ -75,7 +111,7 @@ class StandardCSVDecoder(FTPDecoder):
         if config.datetime_mode == "single":
             if config.datetime_column not in header:
                 raise ValueError(
-                    f"Datetime column '{config.datetime_column}' not found in CSV header. "
+                    f"Datetime column '{config.datetime_column}' not found in CSV. "
                     f"Available columns: {', '.join(header)}"
                 )
         else:  # separate
@@ -87,7 +123,7 @@ class StandardCSVDecoder(FTPDecoder):
             
             if missing_columns:
                 raise ValueError(
-                    f"{' and '.join(missing_columns)} not found in CSV header. "
+                    f"{' and '.join(missing_columns)} not found in CSV. "
                     f"Available columns: {', '.join(header)}"
                 )
     
@@ -143,7 +179,7 @@ class StandardCSVDecoder(FTPDecoder):
         exclude_columns = {
             config.datetime_column if config.datetime_mode == "single" else None,
             config.date_column if config.datetime_mode == "separate" else None,
-            config.time_column if config.datetime_mode == "separate" else None
+            config.time_column if config.datetime_mode == "separate" else None,
         }
         exclude_columns.discard(None)
         
