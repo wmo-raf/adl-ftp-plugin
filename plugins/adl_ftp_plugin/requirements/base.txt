@@ -14,8 +14,6 @@ cffi==2.0.0
     #   pynacl
 cryptography==46.0.1
     # via paramiko
-django==5.2.6
-    # via django-vue-utils
 django-vue-utils==0.1.7
     # via -r base.in
 invoke==2.2.0
