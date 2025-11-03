@@ -1,11 +1,12 @@
+import os
 import posixpath
-import re
 from datetime import datetime, timezone
 
 
 def parse_date_from_filename(filename, date_format, tz=timezone.utc):
     """
     Extract and parse date from filename based on format.
+    Assumes date is at the END of the filename (before extension).
     
     :param filename: The filename to parse
     :param date_format: The date format string (e.g., "YYYYMMDD")
@@ -13,88 +14,90 @@ def parse_date_from_filename(filename, date_format, tz=timezone.utc):
     :return: datetime object or None if date cannot be parsed
     """
     # Remove file extension
-    name_without_ext = filename.rsplit('.', 1)[0]
+    name_without_ext, ext = os.path.splitext(filename)
     
-    # Format patterns and their regex/strptime equivalents
+    # Handle edge case: hidden files with no extension
+    if not name_without_ext:
+        name_without_ext = filename
+    
+    # Map format to (expected_length, strptime_format)
     format_patterns = {
         # Compact formats
-        "YYYYMMDD": (r'(\d{4})(\d{2})(\d{2})', "%Y%m%d"),
-        "YYYYMMDDHH": (r'(\d{4})(\d{2})(\d{2})(\d{2})', "%Y%m%d%H"),
-        "YYYYMMDDHHMM": (r'(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})', "%Y%m%d%H%M"),
-        "YYYYMMDDHHMMSS": (r'(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})', "%Y%m%d%H%M%S"),
-        "YYMMDD": (r'(\d{2})(\d{2})(\d{2})', "%y%m%d"),
-        "YYMMDDHHMM": (r'(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})', "%y%m%d%H%M"),
-        "DDMMYYYY": (r'(\d{2})(\d{2})(\d{4})', "%d%m%Y"),
-        "MMDDYYYY": (r'(\d{2})(\d{2})(\d{4})', "%m%d%Y"),
-        "DDMMYY": (r'(\d{2})(\d{2})(\d{2})', "%d%m%y"),
-        "MMDDYY": (r'(\d{2})(\d{2})(\d{2})', "%m%d%y"),
+        "YYYYMMDD": (8, "%Y%m%d"),
+        "YYYYMMDDHH": (10, "%Y%m%d%H"),
+        "YYYYMMDDHHMM": (12, "%Y%m%d%H%M"),
+        "YYYYMMDDHHMMSS": (14, "%Y%m%d%H%M%S"),
+        "YYMMDD": (6, "%y%m%d"),
+        "YYMMDDHHMM": (10, "%y%m%d%H%M"),
+        "DDMMYYYY": (8, "%d%m%Y"),
+        "MMDDYYYY": (8, "%m%d%Y"),
+        "DDMMYY": (6, "%d%m%y"),
+        "MMDDYY": (6, "%m%d%y"),
         
         # Dash separated
-        "YYYY-MM-DD": (r'(\d{4})-(\d{2})-(\d{2})', "%Y-%m-%d"),
-        "YYYY-MM-DD-HH": (r'(\d{4})-(\d{2})-(\d{2})-(\d{2})', "%Y-%m-%d-%H"),
-        "YYYY-MM-DD-HHMM": (r'(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})', "%Y-%m-%d-%H%M"),
-        "YYYY-MM-DD-HHMMSS": (r'(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})', "%Y-%m-%d-%H%M%S"),
-        "DD-MM-YYYY": (r'(\d{2})-(\d{2})-(\d{4})', "%d-%m-%Y"),
-        "MM-DD-YYYY": (r'(\d{2})-(\d{2})-(\d{4})', "%m-%d-%Y"),
-        "YY-MM-DD": (r'(\d{2})-(\d{2})-(\d{2})', "%y-%m-%d"),
+        "YYYY-MM-DD": (10, "%Y-%m-%d"),
+        "YYYY-MM-DD-HH": (13, "%Y-%m-%d-%H"),
+        "YYYY-MM-DD-HHMM": (15, "%Y-%m-%d-%H%M"),
+        "YYYY-MM-DD-HHMMSS": (17, "%Y-%m-%d-%H%M%S"),
+        "DD-MM-YYYY": (10, "%d-%m-%Y"),
+        "MM-DD-YYYY": (10, "%m-%d-%Y"),
+        "YY-MM-DD": (8, "%y-%m-%d"),
         
         # Underscore separated
-        "YYYY_MM_DD": (r'(\d{4})_(\d{2})_(\d{2})', "%Y_%m_%d"),
-        "YYYY_MM_DD_HH": (r'(\d{4})_(\d{2})_(\d{2})_(\d{2})', "%Y_%m_%d_%H"),
-        "YYYY_MM_DD_HHMM": (r'(\d{4})_(\d{2})_(\d{2})_(\d{2})(\d{2})', "%Y_%m_%d_%H%M"),
-        "YYYY_MM_DD_HHMMSS": (r'(\d{4})_(\d{2})_(\d{2})_(\d{2})(\d{2})(\d{2})', "%Y_%m_%d_%H%M%S"),
-        "DD_MM_YYYY": (r'(\d{2})_(\d{2})_(\d{4})', "%d_%m_%Y"),
-        "MM_DD_YYYY": (r'(\d{2})_(\d{2})_(\d{4})', "%m_%d_%Y"),
+        "YYYY_MM_DD": (10, "%Y_%m_%d"),
+        "YYYY_MM_DD_HH": (13, "%Y_%m_%d_%H"),
+        "YYYY_MM_DD_HHMM": (15, "%Y_%m_%d_%H%M"),
+        "YYYY_MM_DD_HHMMSS": (17, "%Y_%m_%d_%H%M%S"),
+        "DD_MM_YYYY": (10, "%d_%m_%Y"),
+        "MM_DD_YYYY": (10, "%m_%d_%Y"),
         
         # Dot separated
-        "YYYY.MM.DD": (r'(\d{4})\.(\d{2})\.(\d{2})', "%Y.%m.%d"),
-        "DD.MM.YYYY": (r'(\d{2})\.(\d{2})\.(\d{4})', "%d.%m.%Y"),
-        "MM.DD.YYYY": (r'(\d{2})\.(\d{2})\.(\d{4})', "%m.%d.%Y"),
+        "YYYY.MM.DD": (10, "%Y.%m.%d"),
+        "DD.MM.YYYY": (10, "%d.%m.%Y"),
+        "MM.DD.YYYY": (10, "%m.%d.%Y"),
         
         # ISO 8601 / RFC 3339 variants
-        "YYYY-MM-DDTHH": (r'(\d{4})-(\d{2})-(\d{2})T(\d{2})', "%Y-%m-%dT%H"),
-        "YYYY-MM-DDTHHMMSS": (r'(\d{4})-(\d{2})-(\d{2})T(\d{2})(\d{2})(\d{2})', "%Y-%m-%dT%H%M%S"),
-        "YYYY-MM-DDTHH:MM:SS": (r'(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})', "%Y-%m-%dT%H:%M:%S"),
+        "YYYY-MM-DDTHH": (13, "%Y-%m-%dT%H"),
+        "YYYY-MM-DDTHHMMSS": (17, "%Y-%m-%dT%H%M%S"),
+        "YYYY-MM-DDTHH:MM:SS": (19, "%Y-%m-%dT%H:%M:%S"),
         
         # Julian date
-        "YYYYDDD": (r'(\d{4})(\d{3})', "%Y%j"),
-        "YYDDD": (r'(\d{2})(\d{3})', "%y%j"),
+        "YYYYDDD": (7, "%Y%j"),
+        "YYDDD": (5, "%y%j"),
         
         # Year and month only
-        "YYYYMM": (r'(\d{4})(\d{2})', "%Y%m"),
-        "YYYY-MM": (r'(\d{4})-(\d{2})', "%Y-%m"),
-        "YYYY_MM": (r'(\d{4})_(\d{2})', "%Y_%m"),
+        "YYYYMM": (6, "%Y%m"),
+        "YYYY-MM": (7, "%Y-%m"),
+        "YYYY_MM": (7, "%Y_%m"),
         
-        # Text month formats (abbreviated)
-        "YYYY-MMM-DD": (r'(\d{4})-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-(\d{2})', "%Y-%b-%d"),
-        "DD-MMM-YYYY": (r'(\d{2})-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-(\d{4})', "%d-%b-%Y"),
-        "YYYYMMMDD": (r'(\d{4})(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(\d{2})', "%Y%b%d"),
-        "DDMMMYYYY": (r'(\d{2})(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(\d{4})', "%d%b%Y"),
+        # Text month formats (abbreviated) - case insensitive
+        "YYYY-MMM-DD": (11, "%Y-%b-%d"),
+        "DD-MMM-YYYY": (11, "%d-%b-%Y"),
+        "YYYYMMMDD": (9, "%Y%b%d"),
+        "DDMMMYYYY": (9, "%d%b%Y"),
     }
     
+    # Handle Unix timestamp separately
+    if date_format == "TIMESTAMP":
+        if len(name_without_ext) >= 10:
+            timestamp_str = name_without_ext[-10:]
+            try:
+                timestamp = int(timestamp_str)
+                return datetime.fromtimestamp(timestamp, tz=tz)
+            except (ValueError, OSError):
+                return None
+        return None
+    
     if date_format not in format_patterns:
-        # Handle Unix timestamp separately
-        if date_format == "TIMESTAMP":
-            timestamp_match = re.search(r'(\d{10})', name_without_ext)
-            if timestamp_match:
-                try:
-                    timestamp = int(timestamp_match.group(1))
-                    return datetime.fromtimestamp(timestamp)
-                except (ValueError, OSError):
-                    return None
         return None
     
-    regex_pattern, strptime_format = format_patterns[date_format]
+    expected_length, strptime_format = format_patterns[date_format]
     
-    # Try to find the date pattern in the filename (searching from the end)
-    matches = list(re.finditer(regex_pattern, name_without_ext))
-    
-    if not matches:
+    # Extract the last N characters based on expected length
+    if len(name_without_ext) < expected_length:
         return None
     
-    # Get the last match (closest to file extension)
-    last_match = matches[-1]
-    date_string = last_match.group(0)
+    date_string = name_without_ext[-expected_length:]
     
     try:
         parsed_date = datetime.strptime(date_string, strptime_format)
