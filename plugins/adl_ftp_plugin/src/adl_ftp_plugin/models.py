@@ -901,7 +901,7 @@ class SmartMetFTPUpload(BaseFTPUpload, DispatchChannel):
         return metadata_csv
     
     def upload_stations_metadata(self):
-        if not update_stations_metadata_after_station_update:
+        if not self.update_stations_metadata_after_station_update:
             logger.info(
                 f"[SMARTMET METADATA] Skipping stations metadata upload as it is disabled for channel: {self.name}")
             return
