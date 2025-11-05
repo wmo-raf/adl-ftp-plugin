@@ -833,6 +833,20 @@ class FTPUpload(BaseFTPUpload, DispatchChannel):
 
 
 class SmartMetFTPUpload(BaseFTPUpload, DispatchChannel):
+    update_stations_metadata_after_station_update = models.BooleanField(
+        default=True, verbose_name=_("Update stations metadata on save"),
+        help_text=_("If checked, the stations metadata CSV file will be uploaded to the FTP/SFTP "
+                    "server on saving this configuration"))
+    stations_csv_ftp_path = models.CharField(max_length=255, blank=True, null=True,
+                                             verbose_name=_("Stations Metadata CSV FTP Path"),
+                                             help_text=_(
+                                                 "Path on the FTP/SFTP server to upload the stations metadata CSV file"))
+    stations_file_name = models.CharField(max_length=255, default="stations.csv",
+                                          blank=True,
+                                          null=True,
+                                          verbose_name=_("Stations Metadata CSV File Name"),
+                                          help_text=_("Name of the stations metadata CSV file to upload"))
+    
     panels = DispatchChannel.base_panels + [
         FieldPanel("connection_type"),
         FieldPanel("timezone"),
@@ -844,6 +858,13 @@ class SmartMetFTPUpload(BaseFTPUpload, DispatchChannel):
             FieldPanel("directory"),
             FieldPanel("write_mode"),
         ], heading=_("Basic Configuration")),
+        
+        MultiFieldPanel([
+            FieldPanel("update_stations_metadata_after_station_update"),
+            FieldPanel("stations_csv_ftp_path"),
+            FieldPanel("stations_file_name"),
+        ], heading=_("Stations Metadata CSV Configuration")),
+        
         MultiFieldPanel([
             FieldPanel("passive"),
             FieldPanel("secure"),
@@ -880,13 +901,26 @@ class SmartMetFTPUpload(BaseFTPUpload, DispatchChannel):
         return metadata_csv
     
     def upload_stations_metadata(self):
+        if not update_stations_metadata_after_station_update:
+            logger.info(
+                f"[SMARTMET METADATA] Skipping stations metadata upload as it is disabled for channel: {self.name}")
+            return
+        
+        if not self.stations_csv_ftp_path:
+            logger.warning(
+                f"[SMARTMET METADATA] No FTP path configured for stations metadata CSV in channel: {self.name}")
+            return
+        
         csv_file = self.get_smartmet_metadata_csv()
         
         # Use the flexible client
         client = self.get_client()
         
-        directory = self.directory
-        remote_path = f"{directory}/stations.csv"
+        directory = self.stations_csv_ftp_path
+        file_name = self.stations_file_name
+        if not file_name:
+            file_name = "stations.csv"
+        remote_path = f"{directory}/{file_name}"
         
         logger.info(f"[SMARTMET METADATA] Uploading file to '{remote_path}' via {self.connection_type}")
         client.put(csv_file, remote_path)
