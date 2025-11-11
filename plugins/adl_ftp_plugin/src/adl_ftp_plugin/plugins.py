@@ -1,4 +1,3 @@
-import logging
 import tempfile
 
 from adl.core.registries import Plugin
@@ -11,8 +10,6 @@ from .utils import (
     get_dates_to_now,
     get_date_paths,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class AdlFtpPlugin(Plugin):
@@ -47,6 +44,8 @@ class AdlFtpPlugin(Plugin):
         :rtype: list
         """
         
+        logger = self.get_logger()
+        
         network_conn_ftp = station_link.network_connection
         decoder_name = network_conn_ftp.decoder
         
@@ -59,12 +58,12 @@ class AdlFtpPlugin(Plugin):
             decoder = self.get_decoder(decoder_name)
             
             if not decoder:
-                logger.error(f"[ADL_FTP_PLUGIN] Decoder {decoder_name} not found in decoder registry.")
+                logger.error(f" Decoder {decoder_name} not found in decoder registry.")
                 return
             
             if decoder_name == "standard_csv":
                 if not network_conn_ftp.csv_config:
-                    logger.error(f"[ADL_FTP_PLUGIN] Standard CSV decoder selected but no CSV configuration set.")
+                    logger.error(f" Standard CSV decoder selected but no CSV configuration set.")
                     return
                 decoder._config = network_conn_ftp.csv_config
             
@@ -88,12 +87,12 @@ class AdlFtpPlugin(Plugin):
             records = []
             # Process each path
             for path in paths:
-                logger.debug(f"[ADL_FTP_PLUGIN] Getting FTP data from '{net_ftp_name}' for "
+                logger.debug(f" Getting FTP data from '{net_ftp_name}' for "
                              f"station '{station_name}' from FTP path '{path}'")
                 
                 # check if the path exists
                 if not ftp_client.cd(path):
-                    logger.warning(f"[ADL_FTP_PLUGIN] Path {path} not found")
+                    logger.warning(f" Path {path} not found")
                     continue
                 
                 path_records = self.process_path(station_link, path, decoder, ftp_client, start_date=start_date,
@@ -108,9 +107,11 @@ class AdlFtpPlugin(Plugin):
                 ftp_client.close()
     
     def process_path(self, station_link, path, decoder, ftp_client, start_date=None, end_date=None):
+        logger = self.get_logger()
+        
         station = station_link.station
         
-        logger.debug(f"[ADL_FTP_PLUGIN] Getting list of files in path {path}")
+        logger.debug(f"Getting list of files in path {path}")
         ftp_files_list = ftp_client.list(path, extra=True)
         pattern = station_link.file_pattern
         
@@ -122,11 +123,11 @@ class AdlFtpPlugin(Plugin):
         
         # If no files found, log and continue
         if not matching_files:
-            logger.debug(f"[ADL_FTP_PLUGIN] No files found for station {station.name} matching "
+            logger.debug(f" No files found for station {station.name} matching "
                          f"pattern {pattern} in path {path}")
         else:
             logger.debug(
-                f"[ADL_FTP_PLUGIN] Found {len(matching_files)} matching files for station {station.name} in path {path}")
+                f" Found {len(matching_files)} matching files for station {station.name} in path {path}")
         
         records = []
         
@@ -138,13 +139,13 @@ class AdlFtpPlugin(Plugin):
                                                              file_name=file_name).first()
             
             if db_data_file and station_link.skip_already_downloaded_files:
-                logger.debug(f"[ADL_FTP_PLUGIN] File {file_name} already downloaded")
+                logger.debug(f" File {file_name} already downloaded")
             
             if not db_data_file or not station_link.skip_already_downloaded_files:
                 remote_file_path = normalize_path(f"{path}/{file_name}")
                 
                 with tempfile.NamedTemporaryFile(suffix=file_name) as temp_file:
-                    logger.debug(f"[ADL_FTP_PLUGIN] Downloading file {file_name}..")
+                    logger.debug(f" Downloading file {file_name}..")
                     ftp_client.get(remote_file_path, temp_file.name)
                     
                     db_data_file = FTPStationDataFile(
