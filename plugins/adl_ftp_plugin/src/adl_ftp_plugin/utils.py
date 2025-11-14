@@ -75,6 +75,9 @@ def get_dates_to_now(date_granularity=None, timezone=None, from_date=None, as_st
     now = dj_timezone.localtime(dj_timezone.now(), timezone)
     start_date = dj_timezone.localtime(from_date, timezone)
     
+    # reset to start of the hour
+    start_date = start_date.replace(minute=0, second=0, microsecond=0)
+    
     if start_date > now:
         raise ValueError("from_date cannot be in the future")
     

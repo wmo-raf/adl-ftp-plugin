@@ -3,7 +3,10 @@ from django.urls import path
 from django.utils.html import format_html
 from wagtail import hooks
 
-from .views import get_ftp_connection_dir_list
+from .views import (
+    get_ftp_connection_dir_list
+)
+from .viewsets import FTPSettingsViewSetGroup, standard_csv_config_chooser_viewset
 
 
 @hooks.register("insert_editor_js")
@@ -18,4 +21,12 @@ def urlconf_adl_ftp_plugin():
     return [
         path("adl-ftp-plugin/conn-ftp-list/", get_ftp_connection_dir_list,
              name="get_ftp_connection_dir_list"),
+    ]
+
+
+@hooks.register("register_admin_viewset")
+def register_ftp_viewset():
+    return [
+        standard_csv_config_chooser_viewset,
+        FTPSettingsViewSetGroup()
     ]

@@ -1,0 +1,185 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n wagtailadmin_tags adl_ftp_tags %}
+
+{% block titletag %}{% trans "Test Decoder Configuration" %}{% endblock %}
+
+{% block main_content %}
+    {% if error %}
+        <div class="messages">
+            <div class="help-block help-critical">
+                <svg class="icon icon-warning icon" aria-hidden="true">
+                    <use href="#icon-warning"></use>
+                </svg>
+                <p>
+                    {{ error }}
+                </p>
+
+                <p>
+                    {% trans "Check that you selected the correct connection. If the connection is correct, review your decoder settings or verify the uploaded file." %}
+                </p>
+
+            </div>
+        </div>
+    {% else %}
+        <div class="help-block help-info">
+            <svg class="icon icon-help icon" aria-hidden="true">
+                <use href="#icon-help"></use>
+            </svg>
+            <p>{% trans "Upload a data file to test your decoder configuration and see how it will be parsed." %}</p>
+        </div>
+    {% endif %}
+
+    <form method="POST" enctype="multipart/form-data">
+        {% if form.non_field_errors %}
+            <div class="non-field_errors" style="margin-bottom: 20px">
+                {% include "wagtailadmin/shared/non_field_errors.html" with form=form %}
+            </div>
+        {% endif %}
+        <ul class="fields">
+            {% csrf_token %}
+            {% for field in form %}
+                {% if field.is_hidden %}
+                    {{ field }}
+                {% else %}
+                    {% include "wagtailadmin/shared/field.html" %}
+                {% endif %}
+            {% endfor %}
+            <li>
+                <button type="submit" class="button button-primary">{% trans "Parse File" %}</button>
+            </li>
+        </ul>
+    </form>
+
+    {% if parsed_data %}
+        <div class="parsed-results" style="margin-top: 30px;">
+            <h2>
+                {% trans "Parsing Results" %}
+            </h2>
+
+            <div class="help-block"
+                 style="background: #f5f5f5; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+                <p><strong>{% trans "Connection:" %}</strong> {{ parsed_data.connection_name }}</p>
+                <p><strong>{% trans "Decoder:" %}</strong> {{ parsed_data.decoder_name }}</p>
+                {% if parsed_data.csv_config_name %}
+                    <p><strong>{% trans "CSV Configuration:" %}</strong> {{ parsed_data.csv_config_name }}</p>
+                {% endif %}
+                <p><strong>{% trans "Total Records Parsed:" %}</strong> {{ parsed_data.total_records }}</p>
+
+
+                {% if parsed_data.show_only_mapped %}
+                    <p>
+                        <strong>{% trans "Columns Displayed:" %}</strong> {{ parsed_data.mapped_columns_count }} {% trans "mapped" %}
+                        / {{ parsed_data.all_columns_count }} {% trans "total" %}</p>
+                {% else %}
+                    <p><strong>{% trans "Total Columns:" %}</strong> {{ parsed_data.all_columns_count }}
+                        ({{ parsed_data.mapped_columns_count }} {% trans "mapped" %})</p>
+                {% endif %}
+
+
+                {% if parsed_data.total_records > 100 %}
+                    <p><em>{% trans "Showing first 100 records" %}</em></p>
+                {% endif %}
+            </div>
+
+            {% if parsed_data.header %}
+                <h3>{% trans "File Header Information" %}</h3>
+                <table class="listing">
+                    <thead>
+                    <tr>
+                        <th>{% trans "Field" %}</th>
+                        <th>{% trans "Value" %}</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for key, value in parsed_data.header.items %}
+                        <tr>
+                            <td><strong>{{ key }}</strong></td>
+                            <td>{{ value }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            {% endif %}
+
+            {% if parsed_data.metadata %}
+                <h3>{% trans "Column Metadata" %}</h3>
+                <table class="listing">
+                    <thead>
+                    <tr>
+                        <th>{% trans "Column" %}</th>
+                        <th>{% trans "Unit" %}</th>
+                        <th>{% trans "Processing" %}</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for column, meta in parsed_data.metadata.items %}
+                        <tr>
+                            <td><strong>{{ column }}</strong></td>
+                            <td>{{ meta.unit|default:"-" }}</td>
+                            <td>{{ meta.proc|default:"-" }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            {% endif %}
+
+            {% if parsed_data.mapping %}
+                <h3>{% trans "Variable Mappings" %}</h3>
+                <table class="listing">
+                    <thead>
+                    <tr>
+                        <th>{% trans "File Column" %}</th>
+                        <th>{% trans "ADL Parameter" %}</th>
+                        <th>{% trans "Unit" %}</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for column, mapping in parsed_data.mapping.items %}
+                        <tr>
+                            <td>{{ column }}</td>
+                            <td>{{ mapping.adl_parameter }}</td>
+                            <td>{{ mapping.unit }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            {% endif %}
+
+            <h3>{% trans "Parsed Data Preview" %}</h3>
+
+            <div style="overflow-x: auto;">
+                <table class="listing">
+                    <thead>
+                    <tr>
+                        <th>{% trans "Observation Time" %}</th>
+                        {% for column in parsed_data.columns %}
+                            <th>
+                                {{ column }}
+                                {% if column in parsed_data.mapping %}
+                                    <br>
+                                    <small style="color: #666;">
+                                        ({{ parsed_data.mapping|get_item:column|get_item:'adl_parameter' }})
+                                    </small>
+                                {% endif %}
+                            </th>
+                        {% endfor %}
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for record in parsed_data.records %}
+                        <tr>
+                            <td>{{ record.observation_time|date:"Y-m-d H:i:s" }}</td>
+                            {% if parsed_data.has_station_id %}
+                                <td>{{ record.station_id|default:"-" }}</td>
+                            {% endif %}
+                            {% for column in parsed_data.columns %}
+                                <td>{{ record|get_item:column|default:"-" }}</td>
+                            {% endfor %}
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}

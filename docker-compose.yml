@@ -4,7 +4,7 @@
 # It is accessible at http://localhost .
 
 x-adl-variables: &adl-variables
-  DATABASE_URL: postgis://${ADL_DB_USER:-adl}:${ADL_DB_PASSWORD}@adl_db:5432/${ADL_DB_NAME:-adl}
+  DATABASE_URL: timescalegis://${ADL_DB_USER:-adl}:${ADL_DB_PASSWORD}@adl_db:5432/${ADL_DB_NAME:-adl}
   REDIS_URL: redis://adl_redis:6379/0
   PLUGIN_RUNTIME_SETUP_MARKER: 0
   WAIT_TIMEOUT: 120

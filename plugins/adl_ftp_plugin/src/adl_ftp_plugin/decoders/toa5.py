@@ -118,7 +118,7 @@ class Toa5Decoder(FTPDecoder):
                 
                 if column == 'TIMESTAMP':
                     timestamp = datetime.strptime(val, "%Y-%m-%d %H:%M:%S")
-                    line_data[column] = timestamp
+                    line_data["observation_time"] = timestamp
                 else:
                     try:
                         # Try to convert the value to a float
@@ -129,8 +129,8 @@ class Toa5Decoder(FTPDecoder):
                         pass
             
             # If the timestamp already exists, update the entry with the current values
-            if 'TIMESTAMP' in line_data:
-                data_dict[line_data['TIMESTAMP']] = line_data
+            if 'observation_time' in line_data:
+                data_dict[line_data['observation_time']] = line_data
         
         # Convert the dictionary back to a list
         data = list(data_dict.values())
