@@ -687,6 +687,12 @@ class FTPStationDataFile(models.Model):
     class Meta:
         verbose_name = _("Remote Station Data File")
         verbose_name_plural = _("Remote Station Data Files")
+        indexes = [
+            models.Index(
+                fields=["station_link", "file_name", "id"],
+                name="idx_ftpfile_station_file_id",
+            ),
+        ]
     
     def __str__(self):
         return f"{self.station_link} - {self.file_name}"
