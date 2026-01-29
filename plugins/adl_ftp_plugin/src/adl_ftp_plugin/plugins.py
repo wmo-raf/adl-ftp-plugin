@@ -165,31 +165,28 @@ class AdlFtpPlugin(Plugin):
                 ftp_client
             )
     
-    def _process_file(
-            self,
-            station_link,
-            path: str,
-            file_name: str,
-            decoder,
-            ftp_client
-    ) -> Iterator[Dict[str, Any]]:
+    def _process_file(self, station_link, path, file_name, decoder, ftp_client):
         """
-        Generator that processes a single FTP file and yields its records.
-        """
+         Generator that processes a single FTP file and yields its records.
+         """
+        
         logger = self.get_logger()
         
-        # Check if file was already downloaded
+        # Check if file exists in database
         db_data_file = FTPStationDataFile.objects.filter(
             station_link=station_link,
             file_name=file_name
         ).first()
         
+        # Skip if already downloaded and skip setting is enabled
         if db_data_file and station_link.skip_already_downloaded_files:
             logger.debug(f"File {file_name} already downloaded, skipping")
             return
         
-        # Download and process the file
-        if not db_data_file or not station_link.skip_already_downloaded_files:
+        # Download if new file OR re-download is enabled
+        needs_download = not db_data_file or not station_link.skip_already_downloaded_files
+        
+        if needs_download:
             remote_file_path = normalize_path(f"{path}/{file_name}")
             
             with tempfile.NamedTemporaryFile(suffix=file_name, delete=False) as temp_file:
@@ -199,10 +196,12 @@ class AdlFtpPlugin(Plugin):
                     logger.debug(f"Downloading file {file_name}..")
                     ftp_client.get(remote_file_path, temp_path)
                     
-                    db_data_file = FTPStationDataFile(
-                        station_link=station_link,
-                        file_name=file_name,
-                    )
+                    # Create OR update existing record
+                    if not db_data_file:
+                        db_data_file = FTPStationDataFile(
+                            station_link=station_link,
+                            file_name=file_name,
+                        )
                     
                     with open(temp_path, 'rb') as f:
                         db_data_file.file.save(file_name, f)
