@@ -221,6 +221,9 @@ class AdlFtpPlugin(Plugin):
             
             for record in file_records:
                 yield record
+            
+            db_data_file.processed_at = dj_timezone.now()
+            db_data_file.save(update_fields=['processed_at'])
         
         except Exception as e:
             logger.error(f"Error decoding file {file_name}: {e}")

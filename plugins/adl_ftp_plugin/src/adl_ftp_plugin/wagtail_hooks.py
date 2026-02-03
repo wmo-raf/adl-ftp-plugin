@@ -2,7 +2,11 @@ from django.templatetags.static import static
 from django.urls import path
 from django.utils.html import format_html
 from wagtail import hooks
+from wagtail.admin.filters import WagtailFilterSet
+from wagtail.snippets.models import register_snippet
+from wagtail.snippets.views.snippets import SnippetViewSet
 
+from .models import FTPStationDataFile
 from .views import (
     get_ftp_connection_dir_list
 )
@@ -30,3 +34,20 @@ def register_ftp_viewset():
         standard_csv_config_chooser_viewset,
         FTPSettingsViewSetGroup()
     ]
+
+
+class FTPStationDataFileFilterSet(WagtailFilterSet):
+    class Meta:
+        model = FTPStationDataFile
+        fields = ["station_link"]
+
+
+class FTPStationDataFileViewSet(SnippetViewSet):
+    model = FTPStationDataFile
+    icon = "user"
+    list_per_page = 50
+    inspect_view_enabled = True
+    filterset_class = FTPStationDataFileFilterSet
+
+
+register_snippet(FTPStationDataFileViewSet)

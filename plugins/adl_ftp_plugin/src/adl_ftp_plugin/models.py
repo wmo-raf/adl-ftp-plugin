@@ -683,6 +683,7 @@ class FTPStationDataFile(models.Model):
     file = models.FileField(upload_to=get_ftp_data_file_upload_path, verbose_name=_("File"))
     processed = models.BooleanField(default=False, verbose_name=_("Processed"))
     variable_mappings = models.ManyToManyField(FTPVariableMapping, verbose_name=_("Variable Mappings"))
+    processed_at = models.DateTimeField(null=True, blank=True)
     
     class Meta:
         verbose_name = _("Remote Station Data File")
