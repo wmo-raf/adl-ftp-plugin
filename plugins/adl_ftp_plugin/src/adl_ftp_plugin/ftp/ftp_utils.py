@@ -2,7 +2,7 @@ import os
 import posixpath
 from datetime import datetime, timezone
 
-from adl_ftp_plugin.date_formats import format_has_time_component
+from adl_ftp_plugin.date_formats import format_has_time_component, get_format_definition
 
 
 def parse_date_from_filename(filename, date_format, tz=timezone.utc):
@@ -16,84 +16,29 @@ def parse_date_from_filename(filename, date_format, tz=timezone.utc):
     :return: datetime object or None if date cannot be parsed
     """
     # Remove file extension
-    name_without_ext, ext = os.path.splitext(filename)
+    name_without_ext, _ = os.path.splitext(filename)
     
     # Handle edge case: hidden files with no extension
     if not name_without_ext:
         name_without_ext = filename
     
-    # Map format to (expected_length, strptime_format)
-    format_patterns = {
-        # Compact formats
-        "YYYYMMDD": (8, "%Y%m%d"),
-        "YYYYMMDDHH": (10, "%Y%m%d%H"),
-        "YYYYMMDDHHMM": (12, "%Y%m%d%H%M"),
-        "YYYYMMDDHHMMSS": (14, "%Y%m%d%H%M%S"),
-        "YYMMDD": (6, "%y%m%d"),
-        "YYMMDDHHMM": (10, "%y%m%d%H%M"),
-        "DDMMYYYY": (8, "%d%m%Y"),
-        "MMDDYYYY": (8, "%m%d%Y"),
-        "DDMMYY": (6, "%d%m%y"),
-        "MMDDYY": (6, "%m%d%y"),
-        
-        # Dash separated
-        "YYYY-MM-DD": (10, "%Y-%m-%d"),
-        "YYYY-MM-DD-HH": (13, "%Y-%m-%d-%H"),
-        "YYYY-MM-DD-HHMM": (15, "%Y-%m-%d-%H%M"),
-        "YYYY-MM-DD-HHMMSS": (17, "%Y-%m-%d-%H%M%S"),
-        "DD-MM-YYYY": (10, "%d-%m-%Y"),
-        "MM-DD-YYYY": (10, "%m-%d-%Y"),
-        "YY-MM-DD": (8, "%y-%m-%d"),
-        
-        # Underscore separated
-        "YYYY_MM_DD": (10, "%Y_%m_%d"),
-        "YYYY_MM_DD_HH": (13, "%Y_%m_%d_%H"),
-        "YYYY_MM_DD_HHMM": (15, "%Y_%m_%d_%H%M"),
-        "YYYY_MM_DD_HHMMSS": (17, "%Y_%m_%d_%H%M%S"),
-        "DD_MM_YYYY": (10, "%d_%m_%Y"),
-        "MM_DD_YYYY": (10, "%m_%d_%Y"),
-        
-        # Dot separated
-        "YYYY.MM.DD": (10, "%Y.%m.%d"),
-        "DD.MM.YYYY": (10, "%d.%m.%Y"),
-        "MM.DD.YYYY": (10, "%m.%d.%Y"),
-        
-        # ISO 8601 / RFC 3339 variants
-        "YYYY-MM-DDTHH": (13, "%Y-%m-%dT%H"),
-        "YYYY-MM-DDTHHMMSS": (17, "%Y-%m-%dT%H%M%S"),
-        "YYYY-MM-DDTHH:MM:SS": (19, "%Y-%m-%dT%H:%M:%S"),
-        
-        # Julian date
-        "YYYYDDD": (7, "%Y%j"),
-        "YYDDD": (5, "%y%j"),
-        
-        # Year and month only
-        "YYYYMM": (6, "%Y%m"),
-        "YYYY-MM": (7, "%Y-%m"),
-        "YYYY_MM": (7, "%Y_%m"),
-        
-        # Text month formats (abbreviated) - case insensitive
-        "YYYY-MMM-DD": (11, "%Y-%b-%d"),
-        "DD-MMM-YYYY": (11, "%d-%b-%Y"),
-        "YYYYMMMDD": (9, "%Y%b%d"),
-        "DDMMMYYYY": (9, "%d%b%Y"),
-    }
+    format_def = get_format_definition(date_format)
+    if format_def is None:
+        return None
+    
+    expected_length = format_def["length"]
+    strptime_format = format_def["strptime"]
     
     # Handle Unix timestamp separately
     if date_format == "TIMESTAMP":
-        if len(name_without_ext) >= 10:
-            timestamp_str = name_without_ext[-10:]
+        if len(name_without_ext) >= expected_length:
+            timestamp_str = name_without_ext[-expected_length:]
             try:
                 timestamp = int(timestamp_str)
                 return datetime.fromtimestamp(timestamp, tz=tz)
             except (ValueError, OSError):
                 return None
         return None
-    
-    if date_format not in format_patterns:
-        return None
-    
-    expected_length, strptime_format = format_patterns[date_format]
     
     # Extract the last N characters based on expected length
     if len(name_without_ext) < expected_length:
