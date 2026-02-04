@@ -2,6 +2,8 @@ import os
 import posixpath
 from datetime import datetime, timezone
 
+from adl_ftp_plugin.date_formats import format_has_time_component
+
 
 def parse_date_from_filename(filename, date_format, tz=timezone.utc):
     """
@@ -118,25 +120,9 @@ def filter_files_by_date_range(files, date_format, start_date=None, end_date=Non
     :param tz: Timezone for date parsing
     :return: List of filenames within the date range
     """
-    # Determine if date format includes time component
-    time_formats = [
-        "YYYYMMDDHH",
-        "YYYYMMDDHHMM",
-        "YYYYMMDDHHMMSS",
-        "YYYY-MM-DD-HH",
-        "YYYY-MM-DD-HHMM",
-        "YYYY-MM-DD-HHMMSS",
-        "YYYY_MM_DD_HH",
-        "YYYY_MM_DD_HHMM",
-        "YYYY_MM_DD_HHMMSS",
-        "YYYY-MM-DDTHH",
-        "YYYY-MM-DDTHHMMSS",
-        "YYYY-MM-DDTHH:MM:SS",
-        "YYMMDDHHMM",
-        "TIMESTAMP"
-    ]
     
-    has_time_component = date_format in time_formats
+    # Determine if date format includes time component
+    has_time_component = format_has_time_component(date_format)
     
     filtered_files = []
     
