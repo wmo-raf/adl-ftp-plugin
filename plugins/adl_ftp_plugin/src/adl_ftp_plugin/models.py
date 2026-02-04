@@ -505,6 +505,9 @@ class FTPStationLink(StationLink):
         ("DDMMYY", _("DDMMYY - e.g., 150125")),
         ("MMDDYY", _("MMDDYY - e.g., 011525")),
         
+        # Underscore separated compact datetime
+        ("YYYYMMDD_HHMMSS", _("YYYYMMDD_HHMMSS - e.g., 20250115_143045")),
+        
         # Dash separated
         ("YYYY-MM-DD", _("YYYY-MM-DD - e.g., 2025-01-15")),
         ("YYYY-MM-DD-HH", _("YYYY-MM-DD-HH - e.g., 2025-01-15-14")),
