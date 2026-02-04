@@ -167,8 +167,8 @@ class AdlFtpPlugin(Plugin):
     
     def _process_file(self, station_link, path, file_name, decoder, ftp_client):
         """
-         Generator that processes a single FTP file and yields its records.
-         """
+        Generator that processes a single FTP file and yields its records.
+        """
         
         logger = self.get_logger()
         
@@ -177,11 +177,6 @@ class AdlFtpPlugin(Plugin):
             station_link=station_link,
             file_name=file_name
         ).first()
-        
-        # Skip if already downloaded and skip setting is enabled
-        if db_data_file and station_link.skip_already_downloaded_files:
-            logger.debug(f"File {file_name} already downloaded, skipping")
-            return
         
         # Download if new file OR re-download is enabled
         needs_download = not db_data_file or not station_link.skip_already_downloaded_files
@@ -211,8 +206,10 @@ class AdlFtpPlugin(Plugin):
                         os.unlink(temp_path)
                     except OSError:
                         pass
+        else:
+            logger.debug(f"File {file_name} already downloaded, skipping download")
         
-        # Decode and yield records
+        # Decode and yield records (always, whether freshly downloaded or existing)
         try:
             data = decoder.decode(db_data_file.file.path)
             file_records = data.get("values", [])
