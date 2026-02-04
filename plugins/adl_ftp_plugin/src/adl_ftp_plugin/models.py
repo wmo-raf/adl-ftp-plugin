@@ -498,17 +498,27 @@ class FTPStationLink(StationLink):
     file_pattern = models.CharField(max_length=255, verbose_name=_("File Pattern"))
     
     # Directory structure by date
-    dir_structured_by_date = models.BooleanField(default=False, verbose_name=_("Directory Structured by Date ?"),
-                                                 help_text=_("Check if the files are structured by a combination of"
-                                                             " year, month, day or hour in the remote path. Folders "
-                                                             "structure expected to be in the format "
-                                                             "[YYYY]/[MM]/[DD]/[HH]"))
-    date_granularity = models.CharField(max_length=255, blank=True, null=True, choices=DATE_GRANULARITY_CHOICES,
-                                        verbose_name=_("Date Granularity"),
-                                        help_text=_("How far down the date hierarchy is the file located ? "
-                                                    "This will be used to construct the final name of the folder in the remote path"))
-    month_dir_format = models.CharField(max_length=255, blank=True, null=True, choices=MONTH_FORMAT_CHOICES,
-                                        default="m", verbose_name=_("Month directory Format"), )
+    dir_structured_by_date = models.BooleanField(
+        default=False, verbose_name=_("Directory Structured by Date ?"),
+        help_text=_("Check if the files are structured by a combination of"
+                    " year, month, day or hour in the remote path. Folders "
+                    "structure expected to be in the format "
+                    "[YYYY]/[MM]/[DD]/[HH]"))
+    date_granularity = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        choices=DATE_GRANULARITY_CHOICES,
+        verbose_name=_("Date Granularity"),
+        help_text=_("How far down the date hierarchy is the file located ? "
+                    "This will be used to construct the final name of the folder in the remote path"))
+    month_dir_format = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        choices=MONTH_FORMAT_CHOICES,
+        default="m", verbose_name=_("Month directory Format"),
+    )
     
     # Filename date filtering
     filter_files_by_date = models.BooleanField(
@@ -524,19 +534,30 @@ class FTPStationLink(StationLink):
         verbose_name=_("Filename Date Format"),
         help_text=_("Format of the date in the filename (appears before file extension)")
     )
+    filename_date_timezone = TimeZoneField(
+        default="UTC",
+        verbose_name=_("Filename Date Timezone"),
+        help_text=_("Timezone to use when parsing dates from filenames")
+    )
     
-    start_date = models.DateTimeField(blank=True, null=True, validators=[validate_start_date],
-                                      verbose_name=_("Start Date"),
-                                      help_text=_("Start date for data pulling. Select a past date to include the "
-                                                  "historical data. Leave blank for collecting realtime data only"), )
-    skip_already_downloaded_files = models.BooleanField(default=True,
-                                                        verbose_name=_("Skip downloading already downloaded files"),
-                                                        help_text=_(
-                                                            "Do not download files that have already been downloaded"))
-    skip_already_processed_files = models.BooleanField(default=True,
-                                                       verbose_name=_("Skip processing already processed files"),
-                                                       help_text=_(
-                                                           "Do not process files that have already been processed"))
+    start_date = models.DateTimeField(
+        blank=True,
+        null=True,
+        validators=[validate_start_date],
+        verbose_name=_("Start Date"),
+        help_text=_("Start date for data pulling. Select a past date to include the "
+                    "historical data. Leave blank for collecting realtime data only"),
+    )
+    skip_already_downloaded_files = models.BooleanField(
+        default=True,
+        verbose_name=_("Skip downloading already downloaded files"),
+        help_text=_("Do not download files that have already been downloaded")
+    )
+    skip_already_processed_files = models.BooleanField(
+        default=True,
+        verbose_name=_("Skip processing already processed files"),
+        help_text=_("Do not process files that have already been processed")
+    )
     
     panels = StationLink.panels + [
         MultiFieldPanel([
@@ -551,6 +572,7 @@ class FTPStationLink(StationLink):
         MultiFieldPanel([
             FieldPanel("filter_files_by_date"),
             FieldPanel("filename_date_format"),
+            FieldPanel("filename_date_timezone"),
         ], heading=_("Filename Date Filtering")),
         MultiFieldPanel([
             FieldPanel("start_date"),

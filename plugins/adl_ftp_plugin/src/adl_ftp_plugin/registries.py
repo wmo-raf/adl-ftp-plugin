@@ -64,7 +64,7 @@ class FTPDecoder(Instance):
                 station_link.filename_date_format,
                 start_date,
                 end_date,
-                tz=station_link.timezone
+                tz=station_link.filename_date_timezone
             )
         
         return matching_files
