@@ -33,6 +33,27 @@ class FTPError(Exception):
         return f"{self.message} (HTTP {self.status})"
 
 
+def _make_tls_conn(host, user, password, timeout, ctx, **kwargs):
+    """
+    Create an FTP_TLS connection with SSL session reuse on the data channel.
+    This fixes the [SSL: SHUTDOWN_WHILE_IN_INIT] error that occurs when the
+    server requires the data connection to reuse the control channel SSL session.
+    """
+    
+    class _FTP_TLS(FTP_TLS):
+        def ntransfercmd(self, cmd, rest=None):
+            conn, size = FTP.ntransfercmd(self, cmd, rest)
+            if self._prot_p:
+                conn = self.context.wrap_socket(
+                    conn,
+                    server_hostname=self.host,
+                    session=self.sock.session  # reuse control channel SSL session
+                )
+            return conn, size
+    
+    return _FTP_TLS(host=host, user=user, passwd=password, timeout=timeout, context=ctx, **kwargs)
+
+
 class FTPClient:
     """ FTP client """
     tmp_output = None
@@ -43,19 +64,24 @@ class FTPClient:
         self.port = port
         self.user = user
         self.password = password
-        if port:
-            FTP.port = port
+        
         try:
             if secure and FTP_TLS:
+                ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                self.conn = _make_tls_conn(host, user, password, timeout, ctx, **kwargs)
                 if port:
-                    if self.port:
-                        FTP_TLS.port = self.port
-                    self.conn = FTP_TLS(host=host, user=user, passwd=password, **kwargs)
-                    self.conn.prot_p()
+                    self.conn.port = port
+                self.conn.prot_p()
             else:
                 self.conn = FTP(host=host, user=user, passwd=password, timeout=timeout, **kwargs)
+                if port:
+                    self.conn.port = port
+            
             if not passive:
                 self.conn.set_pasv(False)
+        
         except FTP_CONNECTION_ERRORS as e:
             message, status = map_ftp_error(e)
             raise FTPError(message, status)
