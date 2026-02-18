@@ -107,14 +107,25 @@ def filter_files_by_date_range(files, date_format, start_date=None, end_date=Non
     return filtered_files
 
 
-def get_ftp_dir_list(ftp_client, remote_path="/"):
+def get_ftp_dir_list(ftp_client, remote_path="/", root_request=False):
     """
     Get a list of directories from the FTP server.
 
     :param ftp_client: An instance of FTPClient connected to the FTP server.
     :param remote_path: The path on the FTP server to list directories from.
+    :param root_request: If True, return root as a single expandable node
+                         without loading its children yet.
     :return: A list of directories with their names and paths.
     """
+    
+    # On initial load, just return root node — children load on expand
+    if root_request:
+        return [{
+            "id": "/",
+            "label": "/",
+            "children": None  # None = not yet loaded, triggers lazy fetch on expand
+        }]
+    
     directories = []
     ftp_dir_list = ftp_client.list(remote=remote_path, extra=True, remove_relative_paths=True)
     
@@ -124,8 +135,8 @@ def get_ftp_dir_list(ftp_client, remote_path="/"):
             full_path = posixpath.normpath(posixpath.join(remote_path, name))
             directories.append({
                 "id": full_path,
-                "label": full_path,
-                "children": None
+                "label": name,  # show just the folder name, not full path
+                "children": None  # expandable but not yet loaded
             })
     
     return directories
