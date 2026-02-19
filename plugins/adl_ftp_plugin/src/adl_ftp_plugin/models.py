@@ -474,6 +474,12 @@ class FTPVariableMapping(Orderable):
         return self.file_variable_unit
 
 
+class FTPListingStrategy(models.TextChoices):
+    PATTERN_ONLY = "pattern_only", _("Pattern Only — no date filtering")
+    FILTER_BY_DATE = "filter_by_date", _("Filter by Date — list all files, filter by date in filename")
+    DIRECT_FETCH = "direct_fetch", _("Direct Fetch — construct filenames from time increment, no listing")
+
+
 class FTPStationLink(StationLink):
     extra_list_display = ["ftp_path", "file_pattern", "start_date"]
     
@@ -493,11 +499,22 @@ class FTPStationLink(StationLink):
         ("f", _("Month, textual, full, lowercase. 'january'")),
     ]
     
+    # -------------------------------------------------------------------------
+    # Remote Configuration — shared by all strategies
+    # -------------------------------------------------------------------------
     ftp_path = models.CharField(max_length=255, verbose_name=_("Remote Path"),
                                 help_text=_("Path to the directory containing the data files"))
-    file_pattern = models.CharField(max_length=255, verbose_name=_("File Pattern"))
+    file_pattern = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name=_("File Pattern"),
+        help_text=_("Glob pattern to match files e.g. 'Station1_*.dat'. Not required for Direct Fetch.")
+    )
     
-    # Directory structure by date
+    # -------------------------------------------------------------------------
+    # Directory Structure — shared by all strategies, about file organization
+    # -------------------------------------------------------------------------
     dir_structured_by_date = models.BooleanField(
         default=False, verbose_name=_("Directory Structured by Date ?"),
         help_text=_("Check if the files are structured by a combination of"
@@ -520,12 +537,26 @@ class FTPStationLink(StationLink):
         default="m", verbose_name=_("Month directory Format"),
     )
     
-    # Filename date filtering
-    filter_files_by_date = models.BooleanField(
-        default=False,
-        verbose_name=_("Filter files by date in filename"),
-        help_text=_("Check if filenames contain dates that should be used to filter which files to download")
+    # -------------------------------------------------------------------------
+    # Listing Strategy — drives which fields below are used
+    # -------------------------------------------------------------------------
+    
+    listing_strategy = models.CharField(
+        max_length=40,
+        choices=FTPListingStrategy.choices,
+        default=FTPListingStrategy.PATTERN_ONLY,
+        verbose_name=_("File Listing Strategy"),
+        help_text=_(
+            "How files are located on the server. "
+            "'Pattern Only' for static filenames. "
+            "'Filter by Date' for dated filenames requiring a full listing. "
+            "'Direct Fetch' for predictable time-incremented filenames — skips listing entirely."
+        )
     )
+    
+    # -------------------------------------------------------------------------
+    # Filter by Date — only used when listing_strategy = filter_by_date
+    # -------------------------------------------------------------------------
     filename_date_format = models.CharField(
         max_length=50,
         blank=True,
@@ -540,6 +571,56 @@ class FTPStationLink(StationLink):
         help_text=_("Timezone to use when parsing dates from filenames")
     )
     
+    # -------------------------------------------------------------------------
+    # Direct Fetch — only used when listing_strategy = direct_fetch
+    # -------------------------------------------------------------------------
+    direct_fetch_prefix = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        verbose_name=_("File Prefix"),
+        help_text=_(
+            "Everything in the filename that appears before the datetime. "
+            "e.g. for 'STATION_001_20260219122000.txt' the prefix is 'STATION_001_'. "
+            "The datetime and extension are appended automatically."
+        )
+    )
+    direct_fetch_interval_minutes = models.PositiveIntegerField(
+        blank=True,
+        null=True,
+        verbose_name=_("File Interval (minutes)"),
+        help_text=_("Interval in minutes between files e.g. 10 for files generated every 10 minutes.")
+    )
+    direct_fetch_datetime_format = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        choices=FILENAME_DATE_FORMAT_CHOICES,
+        verbose_name=_("File Datetime Format"),
+        help_text=_(
+            "Format of the datetime embedded in the filename. "
+        )
+    )
+    direct_fetch_datetime_timezone = TimeZoneField(
+        default="UTC",
+        verbose_name=_("File Datetime Timezone"),
+        help_text=_(
+            "Timezone of the datetime embedded in the filename. "
+            "Check with your data provider whether the filename datetime is local time or UTC."
+        )
+    )
+    direct_fetch_file_extension = models.CharField(
+        max_length=10,
+        default=".txt",
+        blank=True,
+        null=True,
+        verbose_name=_("File Extension"),
+        help_text=_("File extension including the dot. e.g. '.txt', '.csv'")
+    )
+    
+    # -------------------------------------------------------------------------
+    # Data Collection — shared by all strategies
+    # -------------------------------------------------------------------------
     start_date = models.DateTimeField(
         blank=True,
         null=True,
@@ -570,17 +651,32 @@ class FTPStationLink(StationLink):
             FieldPanel("month_dir_format"),
         ], heading=_("Directory Structure")),
         MultiFieldPanel([
-            FieldPanel("filter_files_by_date"),
+            FieldPanel("listing_strategy"),
+        ], heading=_("File Listing Strategy")),
+        MultiFieldPanel([
             FieldPanel("filename_date_format"),
             FieldPanel("filename_date_timezone"),
-        ], heading=_("Filename Date Filtering")),
+        ], heading=_("Filter by Date")),
+        MultiFieldPanel([
+            FieldPanel("direct_fetch_prefix"),
+            FieldPanel("direct_fetch_datetime_format"),
+            FieldPanel("direct_fetch_interval_minutes"),
+            FieldPanel("direct_fetch_datetime_timezone"),
+            FieldPanel("direct_fetch_file_extension"),
+        ], heading=_("Direct Fetch")),
         MultiFieldPanel([
             FieldPanel("start_date"),
             FieldPanel("skip_already_downloaded_files"),
         ], heading=_("Data Collection")),
-        InlinePanel("variable_mappings", label=_("Variable Mapping"), heading=_("Variable Mappings"),
-                    help_text=_(
-                        "Set the station specific variable mapping for the data files, if the general variable mapping in Connection does not apply for this station  ")),
+        InlinePanel(
+            "variable_mappings",
+            label=_("Variable Mapping"),
+            heading=_("Variable Mappings"),
+            help_text=_(
+                "Set the station specific variable mapping for the data files, "
+                "if the general variable mapping in Connection does not apply for this station"
+            )
+        ),
     ] + StationLink.aggregation_panels
     
     class Meta:
@@ -591,13 +687,43 @@ class FTPStationLink(StationLink):
         return f"{self.network_connection} - {self.station.wigos_id} - {self.station}"
     
     def clean(self):
-        """Validate configuration"""
         super().clean()
         
-        if self.filter_files_by_date and not self.filename_date_format:
-            raise ValidationError({
-                'filename_date_format': _("Filename date format is required when filtering files by date")
-            })
+        if self.listing_strategy in [FTPListingStrategy.PATTERN_ONLY, FTPListingStrategy.FILTER_BY_DATE]:
+            if not self.file_pattern:
+                raise ValidationError({
+                    'file_pattern': _(
+                        "File pattern is required for Pattern Only and Filter by Date strategies"
+                    )
+                })
+        
+        if self.listing_strategy == FTPListingStrategy.FILTER_BY_DATE:
+            if not self.filename_date_format:
+                raise ValidationError({
+                    'filename_date_format': _(
+                        "Filename date format is required when using Filter by Date strategy"
+                    )
+                })
+        
+        if self.listing_strategy == FTPListingStrategy.DIRECT_FETCH:
+            if not self.direct_fetch_prefix:
+                raise ValidationError({
+                    'direct_fetch_prefix': _(
+                        "File prefix is required when using Direct Fetch strategy"
+                    )
+                })
+            if not self.direct_fetch_interval_minutes:
+                raise ValidationError({
+                    'direct_fetch_interval_minutes': _(
+                        "File interval is required when using Direct Fetch strategy"
+                    )
+                })
+            if not self.direct_fetch_datetime_format:
+                raise ValidationError({
+                    'direct_fetch_datetime_format': _(
+                        "Datetime format is required when using Direct Fetch strategy"
+                    )
+                })
     
     def get_variable_mappings(self):
         """Returns the variable mappings for this station link."""
