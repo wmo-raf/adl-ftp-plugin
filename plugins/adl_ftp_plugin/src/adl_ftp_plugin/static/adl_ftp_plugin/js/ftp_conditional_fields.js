@@ -1,54 +1,41 @@
 $(document).ready(function () {
-    const $dirStructuredByDate = $('#id_dir_structured_by_date')
+    // Directory Structure
+    const $dirStructuredByDate = $('#id_dir_structured_by_date');
+    const $dateGranularityWrapper = $('#id_date_granularity').closest('.w-panel__wrapper');
+    const $monthDirFormatWrapper = $('#id_month_dir_format').closest('.w-panel__wrapper');
 
-    const $dateGranularityInput = $('#id_date_granularity');
-    const $dateGranularityInputWrapper = $dateGranularityInput.closest('.w-panel__wrapper');
+    // Listing Strategy
+    const $listingStrategy = $('#id_listing_strategy');
 
-    const $monthDirFormatInput = $('#id_month_dir_format');
-    const $monthDirFormatInputWrapper = $monthDirFormatInput.closest('.w-panel__wrapper');
+    // File Pattern field — not needed for Direct Fetch
+    const $filePatternWrapper = $('#id_file_pattern').closest('.w-panel__wrapper');
 
-    // Initial check to set visibility based on the checkbox state
+    // Filter by Date section
+    const $filterByDateSection = $('#panel-filter_by_date-section');
+
+    // Direct Fetch section
+    const $directFetchSection = $('#panel-direct_fetch-section');
+
+    // Initial state
     showHideDirDateFields();
+    showHideStrategyFields();
 
-    // Event listener for checkbox change
-    $dirStructuredByDate.on('change', function () {
-        showHideDirDateFields();
-    });
+    // Listeners
+    $dirStructuredByDate.on('change', showHideDirDateFields);
+    $listingStrategy.on('change', showHideStrategyFields);
 
     function showHideDirDateFields() {
-        if ($dirStructuredByDate.is(':checked')) {
-            $dateGranularityInputWrapper.show();
-            $monthDirFormatInputWrapper.show();
-        } else {
-            $dateGranularityInputWrapper.hide();
-            $monthDirFormatInputWrapper.hide();
-        }
+        const checked = $dirStructuredByDate.is(':checked');
+        $dateGranularityWrapper.toggle(checked);
+        $monthDirFormatWrapper.toggle(checked);
     }
 
+    function showHideStrategyFields() {
+        const strategy = $listingStrategy.val();
+        const isDirectFetch = strategy === 'direct_fetch';
 
-    const $filterFilesByDate = $('#id_filter_files_by_date')
-
-    const $filenameDateFormatInput = $('#id_filename_date_format');
-    const $filenameDateFormatInputWrapper = $filenameDateFormatInput.closest('.w-panel__wrapper');
-
-    const $filenameDateTimezoneInput = $('#id_filename_date_timezone');
-    const $filenameDateTimezoneInputWrapper = $filenameDateTimezoneInput.closest('.w-panel__wrapper');
-
-    // Initial check to set visibility based on the checkbox state
-    showHideFilterDateFields();
-
-    // Event listener for checkbox change
-    $filterFilesByDate.on('change', function () {
-        showHideFilterDateFields();
-    });
-
-    function showHideFilterDateFields() {
-        if ($filterFilesByDate.is(':checked')) {
-            $filenameDateFormatInputWrapper.show();
-            $filenameDateTimezoneInputWrapper.show();
-        } else {
-            $filenameDateFormatInputWrapper.hide();
-            $filenameDateTimezoneInputWrapper.hide();
-        }
+        $filePatternWrapper.toggle(!isDirectFetch);
+        $filterByDateSection.toggle(strategy === 'filter_by_date');
+        $directFetchSection.toggle(isDirectFetch);
     }
 });
