@@ -186,7 +186,7 @@ class AdlFtpPlugin(Plugin):
         """
         Generate expected filenames for a date range based on the station link's
         direct fetch configuration — prefix, interval, timezone and extension.
-
+    
         :param station_link: The station link configuration
         :param start_date: Start datetime (UTC)
         :param end_date: End datetime (UTC)
@@ -200,10 +200,6 @@ class AdlFtpPlugin(Plugin):
         if isinstance(tz, str):
             tz = pytz.timezone(tz)
         
-        # Convert start/end to the filename timezone
-        local_start = dj_timezone.localtime(start_date, tz)
-        local_end = dj_timezone.localtime(end_date, tz)
-        
         prefix = station_link.direct_fetch_prefix
         interval = station_link.direct_fetch_interval_minutes
         extension = station_link.direct_fetch_file_extension or ".txt"
@@ -216,13 +212,22 @@ class AdlFtpPlugin(Plugin):
             )
             return []
         
-        filenames = []
-        current = local_start
-        
-        format_def = get_format_definition(station_link.direct_fetch_datetime_format)
+        format_def = get_format_definition(datetime_format)
         if not format_def:
             logger.error(f"Invalid datetime format for station {station_link.station.name}")
             return []
+        
+        # Convert start/end to the filename timezone
+        local_start = dj_timezone.localtime(start_date, tz)
+        local_end = dj_timezone.localtime(end_date, tz)
+        
+        # Do not generate filenames beyond now — files in the future may not exist yet
+        now = dj_timezone.localtime(dj_timezone.now(), tz)
+        if local_end > now:
+            local_end = now
+        
+        filenames = []
+        current = local_start
         
         while current <= local_end:
             datetime_str = current.strftime(format_def["strptime"])
