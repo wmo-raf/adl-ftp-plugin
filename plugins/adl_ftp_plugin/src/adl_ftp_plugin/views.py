@@ -49,6 +49,13 @@ def get_ftp_connection_dir_list(request):
         return JsonResponse({"error": str(e)}, status=400)
 
 
+def column_sort_key(col):
+    parts = col.rsplit('_', 1)
+    if len(parts) == 2 and parts[1].isdigit():
+        return (parts[0], int(parts[1]))
+    return (col, 0)
+
+
 @require_http_methods(["GET", "POST"])
 def test_decoder_config(request):
     """Test decoder configuration by parsing an uploaded file"""
@@ -119,7 +126,10 @@ def test_decoder_config(request):
                                 all_columns.update(record.keys())
                             
                             # Remove observation_time
-                            all_data_columns = sorted([col for col in all_columns if col not in ['observation_time']])
+                            all_data_columns = sorted(
+                                [col for col in all_columns if col not in ['observation_time']],
+                                key=column_sort_key
+                            )
                             
                             if show_only_mapped:
                                 data_columns = [col for col in all_data_columns if col in mapped_columns]
