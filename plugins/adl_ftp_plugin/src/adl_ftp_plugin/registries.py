@@ -42,7 +42,7 @@ class FTPDecoder(Instance):
     def get_matching_files(self, station_link, files, start_date=None, end_date=None):
         """
         Returns a list of files that match the decoder and date range.
-
+    
         :param station_link: The station link that is used to collect the data.
         :type station_link: adl_ftp_plugin.models.FTPStationLink
         :param files: The list of files that should be checked.
@@ -52,13 +52,15 @@ class FTPDecoder(Instance):
         :return: The list of matching files.
         :rtype: list[str]
         """
+        from .models import FTPListingStrategy
+        
         pattern = station_link.file_pattern
         
         # Filter files by pattern
         matching_files = [file for file in files if fnmatch.fnmatch(file, pattern)]
         
-        # If filename date filtering is enabled, filter by date
-        if station_link.filter_files_by_date and station_link.filename_date_format:
+        # If strategy is filter_by_date, filter by date in filename
+        if station_link.listing_strategy == FTPListingStrategy.FILTER_BY_DATE and station_link.filename_date_format:
             matching_files = filter_files_by_date_range(
                 matching_files,
                 station_link.filename_date_format,
