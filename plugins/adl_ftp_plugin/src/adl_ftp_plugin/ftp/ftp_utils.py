@@ -135,7 +135,7 @@ def get_ftp_dir_list(ftp_client, remote_path="/", root_request=False):
             full_path = posixpath.normpath(posixpath.join(remote_path, name))
             directories.append({
                 "id": full_path,
-                "label": name,  # show just the folder name, not full path
+                "label": full_path,
                 "children": None  # expandable but not yet loaded
             })
     
