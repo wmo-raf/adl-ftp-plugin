@@ -75,9 +75,13 @@ class FTPClient:
                     self.conn.port = port
                 self.conn.prot_p()
             else:
-                self.conn = FTP(host=host, user=user, passwd=password, timeout=timeout, **kwargs)
+                ftp = FTP()
+                ftp.timeout = timeout
                 if port:
-                    self.conn.port = port
+                    ftp.port = port
+                ftp.connect(host=host, port=port or 21)
+                ftp.login(user=user, passwd=password)
+                self.conn = ftp
             
             if not passive:
                 self.conn.set_pasv(False)
