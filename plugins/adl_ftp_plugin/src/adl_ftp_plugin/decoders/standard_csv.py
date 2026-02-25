@@ -189,7 +189,12 @@ class StandardCSVDecoder(FTPDecoder):
                 if value:  # Only add non-empty values
                     try:
                         # Try to convert to float
+                        float_val = float(value)
                         record[col_name] = float(value)
+                        # check for No data value
+                        if config.no_data_value is not None and config.no_data_value == float_val:
+                            record[col_name] = None
+                    
                     except ValueError:
                         # Keep as string if not numeric
                         record[col_name] = value

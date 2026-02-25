@@ -210,12 +210,16 @@ class StandardCSVConfig(models.Model):
         help_text=_("Number of rows to skip before the header row")
     )
     
+    no_data_value = models.FloatField(blank=True, null=True, verbose_name=_("No Data Value"),
+                                      help_text=_("Value used in the data, to indicate a missing observation"))
+    
     panels = [
         FieldPanel("name"),
         MultiFieldPanel([
             FieldPanel("has_header"),
             FieldPanel("delimiter"),
             FieldPanel("skip_rows"),
+            FieldPanel("no_data_value"),
         ], heading=_("CSV Structure")),
         MultiFieldPanel([
             FieldPanel("datetime_mode", widget=ConditionalRadioSelect),
