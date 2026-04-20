@@ -30,7 +30,7 @@ class FTPError(Exception):
         self.status = status
     
     def __str__(self):
-        return f"{self.message} (HTTP {self.status})"
+        return f"{self.message} ({self.status})"
 
 
 def _make_tls_conn(host, user, password, timeout, ctx, **kwargs):
@@ -91,23 +91,26 @@ class FTPClient:
             raise FTPError(message, status)
     
     def get(self, path, local=None):
-        if isinstance(local, IOBase):  # open file, leave open
+        if isinstance(local, IOBase):
             local_file = local
-        elif local is None:  # return string
+        elif local is None:
             local_file = BytesIO()
-        else:  # path to file, open, write/close return None
+        else:
             local_file = open(local, 'wb')
         
-        self.conn.retrbinary('RETR ' + path, local_file.write)
+        try:
+            self.conn.retrbinary('RETR ' + path, local_file.write)
+        except FTP_CONNECTION_ERRORS as e:
+            message, status = map_ftp_error(e)
+            raise FTPError(message, status)
+        finally:
+            if not isinstance(local, IOBase) and local is not None:
+                local_file.close()
         
-        if isinstance(local, IOBase):
-            pass
-        elif local is None:
+        if local is None:
             contents = local_file.getvalue()
             local_file.close()
             return contents
-        else:
-            local_file.close()
         
         return None
     
@@ -163,17 +166,19 @@ class FTPClient:
         return self.conn.pwd()
     
     def list(self, remote='.', extra=False, remove_relative_paths=False):
-        """ Return directory list """
-        if extra:
-            self.tmp_output = []
-            self.conn.dir(remote, self._collector)
-            directory_list = split_file_info(self.tmp_output)
-        else:
-            directory_list = self.conn.nlst(remote)
+        try:
+            if extra:
+                self.tmp_output = []
+                self.conn.dir(remote, self._collector)
+                directory_list = split_file_info(self.tmp_output)
+            else:
+                directory_list = self.conn.nlst(remote)
+        except FTP_CONNECTION_ERRORS as e:
+            message, status = map_ftp_error(e)
+            raise FTPError(message, status)
         
         if remove_relative_paths:
             return list(filter(self.is_not_relative_path, directory_list))
-        
         return directory_list
     
     def _collector(self, line):
@@ -223,4 +228,4 @@ def map_ftp_error(exc):
     if isinstance(exc, error_reply):
         return "Unexpected reply from FTP server", 502
     # fallback
-    return str(exc), 400
+    return f"{type(exc).__name__}: {exc}", 400

@@ -99,7 +99,7 @@ class AdlFtpPlugin(Plugin):
                 yield from self._process_file(station_link, current_path, file_name, decoder, ftp_client)
         
         except Exception as e:
-            logger.error(f"Error fetching FTP data: {e}")
+            logger.error(f"Error fetching FTP data: {type(e).__name__}: {e}")
             raise
         finally:
             if ftp_client:
