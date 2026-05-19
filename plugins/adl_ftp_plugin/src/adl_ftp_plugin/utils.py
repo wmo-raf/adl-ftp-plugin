@@ -64,22 +64,68 @@ def add_date_info_to_path(path, date_info, month_dir_format=None):
     return os.path.join(path, *filter(None, parts))
 
 
-def get_dates_to_now(date_granularity=None, timezone=None, from_date=None, as_string=False, str_format=None):
+def get_dates_to_now(
+        date_granularity=None,
+        timezone=None,
+        from_date=None,
+        as_string=False,
+        str_format=None,
+):
     if from_date is None:
         from_date = dj_timezone.now()
     
     if date_granularity is None:
         date_granularity = "day"
     
-    # Ensure correct timezone handling
+    valid_granularities = {"year", "month", "day", "hour"}
+    
+    if date_granularity not in valid_granularities:
+        raise ValueError(
+            "Invalid date granularity. "
+            "Choose 'year', 'month', 'day', or 'hour'."
+        )
+    
+    # Convert to requested timezone
     now = dj_timezone.localtime(dj_timezone.now(), timezone)
     start_date = dj_timezone.localtime(from_date, timezone)
     
-    # reset to start of the hour
-    start_date = start_date.replace(minute=0, second=0, microsecond=0)
-    
     if start_date > now:
         raise ValueError("from_date cannot be in the future")
+    
+    # Normalize to the beginning of the granularity
+    if date_granularity == "year":
+        start_date = start_date.replace(
+            month=1,
+            day=1,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+    
+    elif date_granularity == "month":
+        start_date = start_date.replace(
+            day=1,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+    
+    elif date_granularity == "day":
+        start_date = start_date.replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+    
+    elif date_granularity == "hour":
+        start_date = start_date.replace(
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
     
     dates_list = []
     current_date = start_date
@@ -92,14 +138,15 @@ def get_dates_to_now(date_granularity=None, timezone=None, from_date=None, as_st
         
         if date_granularity == "year":
             current_date += relativedelta(years=1)
+        
         elif date_granularity == "month":
             current_date += relativedelta(months=1)
+        
         elif date_granularity == "day":
             current_date += relativedelta(days=1)
+        
         elif date_granularity == "hour":
             current_date += relativedelta(hours=1)
-        else:
-            raise ValueError("Invalid date granularity. Choose 'year', 'month', 'day', or 'hour'.")
     
     return dates_list
 
