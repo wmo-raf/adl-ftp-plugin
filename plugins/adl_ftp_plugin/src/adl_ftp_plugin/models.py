@@ -772,6 +772,8 @@ def get_ftp_data_file_upload_path(instance, filename):
 
 
 class FTPStationDataFile(models.Model):
+    wagtail_reference_index_ignore = True
+
     station_link = models.ForeignKey(FTPStationLink, on_delete=models.CASCADE, related_name="data_files")
     file_name = models.CharField(max_length=255, verbose_name=_("File Name"))
     file = models.FileField(upload_to=get_ftp_data_file_upload_path, verbose_name=_("File"))
