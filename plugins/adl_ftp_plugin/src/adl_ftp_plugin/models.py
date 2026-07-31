@@ -495,6 +495,7 @@ class NetworkFTP(NetworkConnection):
         diagnostic). Nothing is listed, fetched or written.
         """
         from adl.core.source_checks import SourceCheckResult, SourceCheckStatus
+        from django.utils.translation import gettext
         try:
             client = self.get_client()
         except (FTPError, SFTPError) as e:
@@ -502,7 +503,7 @@ class NetworkFTP(NetworkConnection):
         client.close()
         return SourceCheckResult(
             status=SourceCheckStatus.OK,
-            message=_("Connected and authenticated to %(host)s:%(port)s as %(user)s.") % {
+            message=gettext("Connected and authenticated to %(host)s:%(port)s as %(user)s.") % {
                 "host": self.host,
                 "port": self.effective_port,
                 "user": self.username,
@@ -831,6 +832,7 @@ class FTPStationLink(StationLink):
         judges the resolved path and count better than a rule can.
         """
         from adl.core.source_checks import SourceCheckResult, SourceCheckStatus
+        from django.utils.translation import gettext
         path = self.resolve_source_path()
         pattern = self.source_file_pattern()
         try:
@@ -842,7 +844,7 @@ class FTPStationLink(StationLink):
                 return SourceCheckResult(
                     status=SourceCheckStatus.FAILED,
                     category="PATH_NOT_FOUND",
-                    message=_("Resolved remote path %(path)s was not found on the server.") % {
+                    message=gettext("Resolved remote path %(path)s was not found on the server.") % {
                         "path": path,
                     },
                 )
@@ -851,7 +853,7 @@ class FTPStationLink(StationLink):
             matched_count = len(fnmatch.filter(names, pattern))
             return SourceCheckResult(
                 status=SourceCheckStatus.OK,
-                message=_(
+                message=gettext(
                     "Resolved remote path %(path)s: %(count)s file(s) matching '%(pattern)s'."
                 ) % {"path": path, "count": matched_count, "pattern": pattern},
             )
