@@ -1,3 +1,4 @@
+import fnmatch
 import logging
 
 from adl.core.models import DataParameter, Unit
@@ -15,9 +16,14 @@ from wagtail.admin.panels import MultiFieldPanel, FieldPanel, InlinePanel
 from wagtail.models import Orderable
 
 from adl_ftp_plugin.dispatchers.ftp import dispatch_to_ftp
-from adl_ftp_plugin.ftp import FTPClient
-from adl_ftp_plugin.ftp.sftp import SFTPClient
-from adl_ftp_plugin.utils import get_ftp_decoder_choices
+from adl_ftp_plugin.ftp import FTPClient, FTPError
+from adl_ftp_plugin.ftp.sftp import SFTPClient, SFTPError
+from adl_ftp_plugin.utils import (
+    get_ftp_decoder_choices,
+    get_date_paths,
+    get_dates_to_now,
+    normalize_path,
+)
 from adl_ftp_plugin.validators import validate_start_date
 from .date_formats import FILENAME_DATE_FORMAT_CHOICES
 from .smartmet_utils import get_station_metadata_csv
@@ -29,6 +35,29 @@ from .widgets import (
 )
 
 logger = logging.getLogger(__name__)
+
+# FTPError / SFTPError status codes -> the flat failure vocabulary shared
+# with core (adl.core.classification.FAILURE_CATEGORIES). 502 is absent on
+# purpose: it collapses DNS, refused and TLS faults into one code, and
+# core's own DNS/TCP probe steps already name those faults — declining a
+# category beats guessing one.
+SOURCE_CHECK_ERROR_CATEGORIES = {
+    401: "AUTH_FAILED",
+    403: "PERMISSION_DENIED",
+    404: "PATH_NOT_FOUND",
+    504: "TCP_TIMEOUT",
+}
+
+
+def failed_source_check_result(error):
+    """A FAILED SourceCheckResult for an FTPError / SFTPError, with the
+    category derived from the error's status code where unambiguous."""
+    from adl.core.source_checks import SourceCheckResult, SourceCheckStatus
+    return SourceCheckResult(
+        status=SourceCheckStatus.FAILED,
+        category=SOURCE_CHECK_ERROR_CATEGORIES.get(error.status),
+        message=str(error.message),
+    )
 
 
 class ConnectionType(models.TextChoices):
@@ -454,6 +483,32 @@ class NetworkFTP(NetworkConnection):
         else:
             return FTPClient(**self.ftp_connection_details)
 
+    def get_source_endpoint(self):
+        """The (host, port) core's generic DNS -> TCP probe dials (layer 4
+        of the ingestion diagnostic)."""
+        return self.host, self.effective_port
+
+    def check_source(self):
+        """
+        Connect and authenticate against the server, read-only, and report
+        whether the source accepts our credentials (layer 5 of the ingestion
+        diagnostic). Nothing is listed, fetched or written.
+        """
+        from adl.core.source_checks import SourceCheckResult, SourceCheckStatus
+        try:
+            client = self.get_client()
+        except (FTPError, SFTPError) as e:
+            return failed_source_check_result(e)
+        client.close()
+        return SourceCheckResult(
+            status=SourceCheckStatus.OK,
+            message=_("Connected and authenticated to %(host)s:%(port)s as %(user)s.") % {
+                "host": self.host,
+                "port": self.effective_port,
+                "user": self.username,
+            },
+        )
+
 
 class FTPVariableMapping(Orderable):
     network_ftp = ParentalKey(NetworkFTP, on_delete=models.CASCADE, related_name="variable_mappings")
@@ -742,6 +797,68 @@ class FTPStationLink(StationLink):
     def get_first_collection_date(self):
         """Returns the first collection date for this station link."""
         return self.start_date
+
+    def resolve_source_path(self):
+        """The remote directory this station's files are expected in right
+        now — with the current date period appended when the directory tree
+        is structured by date."""
+        if self.dir_structured_by_date and self.date_granularity:
+            dates = get_dates_to_now(
+                date_granularity=self.date_granularity,
+                timezone=self.timezone,
+            )
+            paths = get_date_paths(
+                self.ftp_path, dates, self.date_granularity, self.month_dir_format
+            )
+            return normalize_path(paths[-1])
+        return normalize_path(self.ftp_path)
+
+    def source_file_pattern(self):
+        """The glob this station's files are matched against, across all
+        listing strategies."""
+        if self.listing_strategy == FTPListingStrategy.DIRECT_FETCH:
+            prefix = self.direct_fetch_prefix or ""
+            extension = self.direct_fetch_file_extension or ""
+            return f"{prefix}*{extension}" if (prefix or extension) else "*"
+        return self.file_pattern or "*"
+
+    def check_station_source(self):
+        """
+        Resolve this station's remote path, list it read-only, and report
+        the resolved path and the match count (layer 5 of the ingestion
+        diagnostic, station-scoped). Zero matches is OK: a date-structured
+        directory is legitimately empty at every rollover, and the operator
+        judges the resolved path and count better than a rule can.
+        """
+        from adl.core.source_checks import SourceCheckResult, SourceCheckStatus
+        path = self.resolve_source_path()
+        pattern = self.source_file_pattern()
+        try:
+            client = self.network_connection.get_client()
+        except (FTPError, SFTPError) as e:
+            return failed_source_check_result(e)
+        try:
+            if not client.cd(path):
+                return SourceCheckResult(
+                    status=SourceCheckStatus.FAILED,
+                    category="PATH_NOT_FOUND",
+                    message=_("Resolved remote path %(path)s was not found on the server.") % {
+                        "path": path,
+                    },
+                )
+            listing = client.list(path, extra=True)
+            names = [entry["name"] for entry in listing]
+            matched_count = len(fnmatch.filter(names, pattern))
+            return SourceCheckResult(
+                status=SourceCheckStatus.OK,
+                message=_(
+                    "Resolved remote path %(path)s: %(count)s file(s) matching '%(pattern)s'."
+                ) % {"path": path, "count": matched_count, "pattern": pattern},
+            )
+        except (FTPError, SFTPError) as e:
+            return failed_source_check_result(e)
+        finally:
+            client.close()
 
 
 class FTPStationLinkVariableMapping(Orderable):
