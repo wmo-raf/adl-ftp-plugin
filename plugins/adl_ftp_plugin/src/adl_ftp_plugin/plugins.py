@@ -85,9 +85,17 @@ class AdlFtpPlugin(Plugin):
             
             net_ftp_name = network_conn_ftp.network.name
             station_name = station_link.station.name
-            
+
+            # Duck-typed sources-count handover: core stores this on the
+            # run's activity log so "looked, found nothing" (0) stays
+            # distinguishable from "never looked" (None). Set only once
+            # listing actually starts — a run that bails before this point
+            # must not report 0.
+            station_link.adl_sources_count = 0
+
             # Process each path — yield records as we go
             for file_path in self._get_file_paths(station_link, ftp_client, decoder, start_date, end_date):
+                station_link.adl_sources_count += 1
                 current_path = os.path.dirname(file_path)
                 file_name = os.path.basename(file_path)
                 
