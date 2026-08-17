@@ -810,6 +810,25 @@ class FTPStationLink(StationLink):
         """Returns the first collection date for this station link."""
         return self.start_date
 
+    def get_extra_model_admin_links(self):
+        """
+        The direct-fetch file list — a preview of the remote paths the next
+        run will try — offered only when this link actually constructs its
+        filenames (``DIRECT_FETCH``). Listing strategies discover files on
+        the server, so there is nothing to preview without I/O; for them
+        the button is absent rather than disabled. Rendered by core on the
+        station-link row menu and inspect header; no I/O here.
+        """
+        if self.listing_strategy != FTPListingStrategy.DIRECT_FETCH or not self.pk:
+            return []
+        return [
+            {
+                "label": _("Direct Fetch Files"),
+                "url": reverse("ftp_direct_fetch_file_list", args=[self.pk]),
+                "icon_name": "doc-full-inverse",
+            }
+        ]
+
     def resolve_source_path(self):
         """The remote directory this station's files are expected in right
         now — with the current date period appended when the directory tree
