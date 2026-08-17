@@ -207,3 +207,190 @@ class DirectFetchFileListViewTests(TestCase):
         # invariant explicit for the default-window path as well
         with mock.patch.object(NetworkFTP, "get_client", ExplodingConnection()):
             self.assertEqual(self.client.get(self.url).status_code, 200)
+
+
+# ---------------------------------------------------------------------------
+# Per-row remote check
+# ---------------------------------------------------------------------------
+
+class FakeStatClient:
+    """A stub client answering stat_file() from a canned table."""
+
+    def __init__(self, table=None, error=None):
+        self.table = table or {}
+        self.error = error
+        self.asked = []
+        self.closed = False
+
+    def stat_file(self, path):
+        self.asked.append(path)
+        if self.error is not None:
+            raise self.error
+        return self.table.get(path, {"exists": False, "size": None})
+
+    def close(self):
+        self.closed = True
+
+
+class OwnPathGuardTests(SimpleTestCase):
+
+    def setUp(self):
+        from adl_ftp_plugin.views import _is_own_direct_fetch_path
+        self.guard = _is_own_direct_fetch_path
+        self.link = make_station_link(**DIRECT_FETCH_KWARGS)
+
+    def test_accepts_a_path_the_link_would_generate(self):
+        self.assertTrue(self.guard(self.link, "/data/station1/STATION1_202608171000.txt"))
+
+    def test_accepts_a_date_structured_subdirectory(self):
+        self.assertTrue(self.guard(self.link, "/data/station1/2026/08/17/STATION1_202608171000.txt"))
+
+    def test_rejects_paths_outside_the_base(self):
+        for path in (
+            "/etc/STATION1_202608171000.txt",
+            "/data/station10/STATION1_202608171000.txt",
+            "/data/station1/../secret/STATION1_202608171000.txt",
+            "STATION1_202608171000.txt",
+            "",
+        ):
+            self.assertFalse(self.guard(self.link, path), path)
+
+    def test_rejects_names_of_another_shape(self):
+        for path in (
+            "/data/station1/OTHER_202608171000.txt",
+            "/data/station1/STATION1_202608171000.csv",
+            "/data/station1/STATION1_notadate.txt",
+        ):
+            self.assertFalse(self.guard(self.link, path), path)
+
+
+class ClientStatFileTests(SimpleTestCase):
+
+    def _ftp_client(self, conn):
+        from adl_ftp_plugin.ftp import FTPClient
+        client = FTPClient.__new__(FTPClient)
+        client.conn = conn
+        return client
+
+    def test_ftp_reports_size_for_an_existing_file(self):
+        conn = mock.Mock()
+        conn.size.return_value = 1234
+        self.assertEqual(self._ftp_client(conn).stat_file("/d/f.txt"), {"exists": True, "size": 1234})
+        conn.voidcmd.assert_called_once_with("TYPE I")
+
+    def test_ftp_550_means_not_found(self):
+        from ftplib import error_perm
+        conn = mock.Mock()
+        conn.size.side_effect = error_perm("550 /d/f.txt: No such file or directory")
+        self.assertEqual(self._ftp_client(conn).stat_file("/d/f.txt"), {"exists": False, "size": None})
+
+    def test_ftp_other_failures_raise(self):
+        from ftplib import error_perm
+        from adl_ftp_plugin.ftp import FTPError
+        conn = mock.Mock()
+        conn.size.side_effect = error_perm("530 Not logged in")
+        with self.assertRaises(FTPError):
+            self._ftp_client(conn).stat_file("/d/f.txt")
+
+    def _sftp_client(self, sftp):
+        from adl_ftp_plugin.ftp.sftp import SFTPClient
+        client = SFTPClient.__new__(SFTPClient)
+        client.sftp = sftp
+        return client
+
+    def test_sftp_reports_size_for_an_existing_file(self):
+        sftp = mock.Mock()
+        sftp.stat.return_value = mock.Mock(st_size=99)
+        self.assertEqual(self._sftp_client(sftp).stat_file("/d/f.txt"), {"exists": True, "size": 99})
+
+    def test_sftp_missing_file_is_a_normal_answer(self):
+        sftp = mock.Mock()
+        sftp.stat.side_effect = FileNotFoundError(2, "No such file")
+        self.assertEqual(self._sftp_client(sftp).stat_file("/d/f.txt"), {"exists": False, "size": None})
+
+    def test_sftp_other_failures_raise(self):
+        from adl_ftp_plugin.ftp.sftp import SFTPError
+        sftp = mock.Mock()
+        sftp.stat.side_effect = OSError(13, "Permission denied")
+        with self.assertRaises(SFTPError):
+            self._sftp_client(sftp).stat_file("/d/f.txt")
+
+
+class DirectFetchFileCheckViewTests(TestCase):
+
+    PATH = "/data/station1/STATION1_202608171000.txt"
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_superuser("admin", "admin@example.test", "pw")
+        self.client.force_login(self.admin)
+        self.connection = make_connection(
+            plugin="adl_ftp_plugin", name="Direct FTP", username="u", password="p"
+        )
+        self.connection.network = StationFactory().network
+        self.connection.save()
+        self.link = FTPStationLink.objects.create(
+            network_connection=self.connection,
+            station=StationFactory(network=self.connection.network),
+            **DIRECT_FETCH_KWARGS,
+        )
+        self.url = reverse("ftp_direct_fetch_file_check", args=[self.link.pk])
+        self.list_url = reverse("ftp_direct_fetch_file_list", args=[self.link.pk])
+
+    def _post(self, fake, path=PATH):
+        with mock.patch.object(NetworkFTP, "get_client", return_value=fake):
+            return self.client.post(self.url, {"path": path})
+
+    def test_existing_file_reports_size(self):
+        fake = FakeStatClient({self.PATH: {"exists": True, "size": 512}})
+        response = self._post(fake)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"path": self.PATH, "exists": True, "size": 512})
+        self.assertEqual(fake.asked, [self.PATH])
+        self.assertTrue(fake.closed)
+
+    def test_missing_file_is_a_normal_answer(self):
+        response = self._post(FakeStatClient())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["exists"], False)
+
+    def test_connection_failure_is_reported_as_502(self):
+        from adl_ftp_plugin.ftp import FTPError
+        response = self._post(FakeStatClient(error=FTPError("Unable to reach FTP host", 502)))
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["error"], "Unable to reach FTP host")
+
+    def test_foreign_path_is_refused_before_any_connection(self):
+        fake = FakeStatClient()
+        response = self._post(fake, path="/etc/passwd")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(fake.asked, [])
+
+    def test_get_is_not_allowed(self):
+        self.assertEqual(self.client.get(self.url).status_code, 405)
+
+    def test_non_direct_fetch_link_is_refused(self):
+        self.link.listing_strategy = FTPListingStrategy.PATTERN_ONLY
+        self.link.file_pattern = "STATION1_*.txt"
+        self.link.save()
+        self.assertEqual(self._post(FakeStatClient()).status_code, 400)
+
+    def test_viewer_cannot_probe_and_sees_no_button(self):
+        from django.contrib.auth.models import Permission
+        viewer = get_user_model().objects.create_user("viewer", "v@example.test", "pw")
+        viewer.user_permissions.add(
+            Permission.objects.get(codename="access_admin"),
+            Permission.objects.get(codename="view_ftpstationlink"),
+        )
+        self.client.force_login(viewer)
+        page = self.client.get(self.list_url, {"from": "2026-08-17T10:00", "to": "2026-08-17T10:00"})
+        self.assertEqual(page.status_code, 200)
+        self.assertFalse(page.context["can_check_remote"])
+        self.assertNotContains(page, "data-path=")
+        self.assertNotContains(page, 'id="dff-check-form"')
+        self.assertIn(self._post(FakeStatClient()).status_code, (302, 403))
+
+    def test_manager_sees_the_button_on_the_list(self):
+        page = self.client.get(self.list_url, {"from": "2026-08-17T10:00", "to": "2026-08-17T10:00"})
+        self.assertTrue(page.context["can_check_remote"])
+        self.assertContains(page, 'data-path="/data/station1/STATION1_202608171000.txt"')
+        self.assertContains(page, self.url)

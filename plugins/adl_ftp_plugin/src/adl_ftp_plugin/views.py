@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone as dj_timezone
 from django.utils.dateparse import parse_date, parse_datetime
 from django.utils.translation import gettext as _
-from django.views.decorators.http import require_GET, require_http_methods
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from wagtail.admin.paginator import WagtailPaginator
 from wagtail.permission_policies import ModelPermissionPolicy
 from wagtail.admin import messages
@@ -26,6 +26,8 @@ from .decoder_variables import (
 from .forms import DecoderVariableMappingFormSet, TestCSVConfigForm
 from .ftp import FTPError
 from .ftp.ftp_utils import clean_remote_path, get_ftp_dir_list, parse_date_from_filename
+from .ftp.sftp import SFTPError
+from .utils import normalize_path
 from .models import FTPListingStrategy, FTPStationDataFile, FTPStationLink, NetworkFTP
 
 logger = logging.getLogger(__name__)
@@ -401,6 +403,12 @@ def direct_fetch_file_list(request, station_link_id):
         "station_link": station_link,
         "back_url": inspect_url,
         "is_direct_fetch": station_link.listing_strategy == FTPListingStrategy.DIRECT_FETCH,
+        # The per-row remote check is I/O against the source, so it takes the
+        # same permission as the station source check; hidden, not disabled
+        "can_check_remote": _user_can_manage_connection(
+            request.user, station_link.network_connection
+        ),
+        "check_url": reverse("ftp_direct_fetch_file_check", args=[station_link.pk]),
     }
     if not context["is_direct_fetch"]:
         context["strategy_label"] = station_link.get_listing_strategy_display()
@@ -471,3 +479,62 @@ def direct_fetch_file_list(request, station_link_id):
         "filename_tz": str(filename_tz),
     })
     return render(request, "adl_ftp_plugin/direct_fetch_file_list.html", context)
+
+
+def _is_own_direct_fetch_path(station_link, path):
+    """
+    Would this station link ever generate ``path``? The check endpoint only
+    probes paths of the link's own shape — under its base path, carrying its
+    prefix/extension and a parseable datetime — so the page cannot be turned
+    into a generic remote-file prober.
+    """
+    if not path or not path.startswith("/") or "/../" in f"{path}/":
+        return False
+    base = normalize_path(station_link.ftp_path or "/").rstrip("/")
+    directory = os.path.dirname(path).rstrip("/")
+    if directory != base and not directory.startswith(f"{base}/"):
+        return False
+    name = os.path.basename(path)
+    prefix = station_link.direct_fetch_prefix or ""
+    extension = station_link.direct_fetch_file_extension or ""
+    if not (name.startswith(prefix) and name.endswith(extension)):
+        return False
+    return parse_date_from_filename(
+        name, station_link.direct_fetch_datetime_format,
+        station_link.direct_fetch_datetime_timezone,
+    ) is not None
+
+
+@require_POST
+def direct_fetch_file_check(request, station_link_id):
+    """
+    Does one generated file exist on the server right now? Opens a connection,
+    asks for the size of that one path, closes. Called per row from the
+    direct-fetch file list on demand — the list itself never touches the
+    server. Answers JSON: ``{"exists": bool, "size": int|null}`` or
+    ``{"error": message}`` with a matching status.
+    """
+    station_link = get_object_or_404(FTPStationLink, pk=station_link_id)
+    if not _user_can_manage_connection(request.user, station_link.network_connection):
+        raise PermissionDenied
+    if station_link.listing_strategy != FTPListingStrategy.DIRECT_FETCH:
+        return JsonResponse(
+            {"error": _("This station link does not use Direct Fetch.")}, status=400
+        )
+
+    path = (request.POST.get("path") or "").strip()
+    if not _is_own_direct_fetch_path(station_link, path):
+        return JsonResponse(
+            {"error": _("That path is not one this station link would generate.")}, status=400
+        )
+
+    client = None
+    try:
+        client = station_link.network_connection.get_client()
+        result = client.stat_file(path)
+    except (FTPError, SFTPError) as e:
+        return JsonResponse({"error": str(e.message)}, status=502)
+    finally:
+        if client:
+            client.close()
+    return JsonResponse({"path": path, "exists": result["exists"], "size": result["size"]})

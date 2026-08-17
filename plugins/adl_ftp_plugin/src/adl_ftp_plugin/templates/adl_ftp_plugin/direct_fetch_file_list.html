@@ -69,6 +69,28 @@
             margin: 0 0 0.75rem;
             color: var(--w-color-text-meta);
         }
+
+        .dff-remote {
+            white-space: nowrap;
+        }
+
+        .dff-remote__result {
+            margin-left: 0.5rem;
+        }
+
+        .dff-remote__size {
+            color: var(--w-color-text-meta);
+            margin-left: 0.35rem;
+        }
+
+        .dff-remote__error {
+            color: var(--w-color-critical-200);
+            margin-left: 0.5rem;
+        }
+
+        .dff-check-form {
+            display: none;
+        }
     </style>
 {% endblock %}
 
@@ -93,6 +115,11 @@
                 would try them, and whether ADL already holds each file. This is a preview computed
                 from the station link's configuration only — nothing is fetched from the server.
             {% endblocktrans %}
+            {% if can_check_remote %}
+                {% blocktrans trimmed %}
+                    Use <strong>Check</strong> on a row to ask the server whether that one file exists.
+                {% endblocktrans %}
+            {% endif %}
         </p>
 
         {% for error in errors %}
@@ -176,6 +203,9 @@
                         <th>{% trans "Remote path" %}</th>
                         <th>{% trans "Filename datetime" %}</th>
                         <th>{% trans "Local status" %}</th>
+                        {% if can_check_remote %}
+                            <th>{% trans "Remote" %}</th>
+                        {% endif %}
                     </tr>
                 </thead>
                 <tbody>
@@ -202,12 +232,22 @@
                                     <span class="dff-muted">{% trans "Not downloaded" %}</span>
                                 {% endif %}
                             </td>
+                            {% if can_check_remote %}
+                                <td class="dff-remote">
+                                    <button type="button" class="button button-small button-secondary dff-check"
+                                            data-path="{{ row.path }}">{% trans "Check" %}</button>
+                                    <span class="dff-remote__result" aria-live="polite"></span>
+                                </td>
+                            {% endif %}
                         </tr>
                     {% endfor %}
                 </tbody>
             </table>
             {% if page_obj.has_other_pages %}
                 {% include "wagtailadmin/shared/pagination_nav.html" with items=page_obj %}
+            {% endif %}
+            {% if can_check_remote %}
+                <form class="dff-check-form" id="dff-check-form" data-url="{{ check_url }}">{% csrf_token %}</form>
             {% endif %}
         {% elif not errors %}
             <div class="help-block help-info">
@@ -216,4 +256,82 @@
             </div>
         {% endif %}
     {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const form = document.getElementById('dff-check-form');
+            if (!form) {
+                return;
+            }
+            const url = form.dataset.url;
+            const csrfToken = form.querySelector('input[name="csrfmiddlewaretoken"]').value;
+            const labels = {
+                checking: '{{ _("Checking…")|escapejs }}',
+                exists: '{{ _("Exists")|escapejs }}',
+                missing: '{{ _("Not found")|escapejs }}',
+                failed: '{{ _("Check failed")|escapejs }}',
+                recheck: '{{ _("Re-check")|escapejs }}',
+            };
+
+            const formatSize = (bytes) => {
+                if (bytes === null || bytes === undefined) {
+                    return '';
+                }
+                if (bytes < 1024) {
+                    return bytes + ' B';
+                }
+                if (bytes < 1024 * 1024) {
+                    return (bytes / 1024).toFixed(1) + ' KB';
+                }
+                return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            };
+
+            const render = (target, html) => {
+                target.innerHTML = html;
+            };
+
+            const check = async (button) => {
+                const cell = button.closest('.dff-remote');
+                const result = cell.querySelector('.dff-remote__result');
+                button.disabled = true;
+                render(result, '<span class="dff-muted">' + labels.checking + '</span>');
+
+                const body = new URLSearchParams();
+                body.set('path', button.dataset.path);
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRFToken': csrfToken,
+                            'X-Requested-With': 'XMLHttpRequest',
+                        },
+                        body,
+                        credentials: 'same-origin',
+                    });
+                    const data = await response.json();
+                    if (!response.ok || data.error) {
+                        render(result, '<span class="dff-remote__error">' + labels.failed + ': ' + (data.error || response.status) + '</span>');
+                    } else if (data.exists) {
+                        const size = formatSize(data.size);
+                        render(result, '<span class="status-badge status-badge--success">' + labels.exists + '</span>' +
+                            (size ? '<span class="dff-remote__size">' + size + '</span>' : ''));
+                    } else {
+                        render(result, '<span class="status-badge status-badge--warning">' + labels.missing + '</span>');
+                    }
+                } catch (err) {
+                    render(result, '<span class="dff-remote__error">' + labels.failed + '</span>');
+                } finally {
+                    button.disabled = false;
+                    button.textContent = labels.recheck;
+                }
+            };
+
+            document.querySelectorAll('.dff-check').forEach((button) => {
+                button.addEventListener('click', () => check(button));
+            });
+        });
+    </script>
 {% endblock %}

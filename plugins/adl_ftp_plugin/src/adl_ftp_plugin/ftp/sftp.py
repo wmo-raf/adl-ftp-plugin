@@ -386,6 +386,25 @@ class SFTPClient:
         except Exception as e:
             raise SFTPError(f"Failed to remove file {path}: {str(e)}", 502)
     
+    def stat_file(self, path):
+        """
+        Does ``path`` exist on the server, and how big is it? One ``stat``
+        round-trip. Returns ``{"exists": bool, "size": int|None}``; a missing
+        file is a normal answer, any other failure raises ``SFTPError``.
+        """
+        try:
+            attrs = self.sftp.stat(path)
+        except FileNotFoundError:
+            return {"exists": False, "size": None}
+        except IOError as e:
+            # paramiko raises IOError(errno=ENOENT) on older versions
+            if getattr(e, "errno", None) == 2:
+                return {"exists": False, "size": None}
+            raise SFTPError(f"Failed to stat {path}: {e}", 502)
+        except SFTP_CONNECTION_ERRORS as e:
+            raise SFTPError(f"Failed to stat {path}: {e}", 502)
+        return {"exists": True, "size": getattr(attrs, "st_size", None)}
+    
     def stat(self, path):
         """Get file/directory statistics"""
         try:

@@ -161,6 +161,26 @@ class FTPClient:
         else:
             return self.pwd()
     
+    def stat_file(self, path):
+        """
+        Does ``path`` exist on the server, and how big is it? One ``SIZE``
+        round-trip, no transfer. Returns ``{"exists": bool, "size": int|None}``;
+        a 550 reply means "no such file", anything else raises ``FTPError``.
+        """
+        try:
+            # SIZE is only guaranteed in binary mode; ASCII-mode servers reject it
+            self.conn.voidcmd("TYPE I")
+            size = self.conn.size(path)
+        except error_perm as e:
+            if str(e).startswith("550"):
+                return {"exists": False, "size": None}
+            message, status = map_ftp_error(e)
+            raise FTPError(message, status)
+        except FTP_CONNECTION_ERRORS as e:
+            message, status = map_ftp_error(e)
+            raise FTPError(message, status)
+        return {"exists": True, "size": size}
+    
     def pwd(self):
         """ Return the current working directory """
         return self.conn.pwd()
