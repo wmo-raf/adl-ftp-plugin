@@ -4,7 +4,16 @@ from datetime import datetime, timedelta
 from typing import Iterator, Dict, Any, Optional
 
 from adl.core.registries import Plugin
+from celery.exceptions import SoftTimeLimitExceeded
 from django.utils import timezone as dj_timezone
+
+try:
+    # ADL >= 0.8.12: yielded between records to have core persist what is
+    # buffered before the generator is resumed. On an older core the marker
+    # does not exist and files are stamped without that guarantee.
+    from adl.core.registries import FLUSH
+except ImportError:  # pragma: no cover - older core
+    FLUSH = None
 
 from adl_ftp_plugin.date_formats import get_format_definition
 from .models import FTPStationDataFile, FTPListingStrategy
@@ -245,12 +254,33 @@ class AdlFtpPlugin(Plugin):
         
         return filenames
     
+    def after_save_records(self, station_link, station_records, saved_records, qc_fail_results=None):
+        """
+        Per-file bookkeeping for :meth:`_process_file`.
+
+        Core calls this after each chunk it upserts. ``_process_file`` zeroes
+        the counter on the station link before yielding a file's records and
+        reads it back once core has consumed the trailing ``FLUSH``, so the
+        number stamped on the file is the observation values that actually
+        reached the database — not the records the decoder produced.
+        """
+        if hasattr(station_link, "_adl_ftp_values_saved"):
+            station_link._adl_ftp_values_saved += len(saved_records)
+
     def _process_file(self, station_link, path, file_name, decoder, ftp_client):
         """
         Generator that processes a single FTP file and yields its records.
 
-        Downloads the file if needed, decodes it, and yields each record.
-        Handles both fresh downloads and already-downloaded files.
+        Downloads the file if needed, decodes it, yields each record, then
+        yields core's ``FLUSH`` marker so the records are persisted before this
+        generator is resumed. Only after that is the file stamped
+        ``processed_at`` — "processed" means its data is in the database, not
+        merely that it decoded — along with ``values_saved``, the number of
+        observation values core reported upserting for it (see
+        :meth:`after_save_records`).
+
+        A file whose download or decode fails is left unstamped, so it shows as
+        "Downloaded, not processed" (or not downloaded) and is retried next run.
         """
         logger = self.get_logger()
         
@@ -283,6 +313,12 @@ class AdlFtpPlugin(Plugin):
                     with open(temp_path, 'rb') as f:
                         db_data_file.file.save(file_name, f)
                 
+                except SoftTimeLimitExceeded:
+                    # It is the batch's time budget that ran out, not this file.
+                    # Swallowed here (it is an Exception subclass) the run would
+                    # roll on to the hard kill; propagated, core persists what
+                    # earlier files yielded and records the timeout honestly.
+                    raise
                 except Exception as e:
                     # For direct fetch, missing files are expected — log at debug level
                     if station_link.listing_strategy == FTPListingStrategy.DIRECT_FETCH:
@@ -302,21 +338,41 @@ class AdlFtpPlugin(Plugin):
         if not db_data_file or not db_data_file.file:
             return
         
-        # Decode and yield records (always, whether freshly downloaded or existing)
+        # Decode (always, whether freshly downloaded or existing)
         try:
             data = decoder.decode(db_data_file.file.path)
             file_records = data.get("values", [])
-            
-            logger.debug(f"Decoded {len(file_records)} records from {file_name}")
-            
-            for record in file_records:
-                yield record
-            
-            db_data_file.processed_at = dj_timezone.now()
-            db_data_file.save(update_fields=['processed_at'])
-        
         except Exception as e:
             logger.error(f"Error decoding file {file_name}: {e}")
+            return
+        
+        logger.debug(f"Decoded {len(file_records)} records from {file_name}")
+        
+        # after_save_records adds to this as core upserts the chunks
+        station_link._adl_ftp_values_saved = 0
+        
+        for record in file_records:
+            yield record
+        
+        if FLUSH is not None:
+            # Resumes only once core has persisted this file's records
+            yield FLUSH
+            values_saved = station_link._adl_ftp_values_saved
+        else:
+            # Older core: chunks may span files, so the per-file count would
+            # be attributed to whichever file happens to be current — leave
+            # it unrecorded rather than record something misleading
+            values_saved = None
+        
+        db_data_file.processed_at = dj_timezone.now()
+        db_data_file.values_saved = values_saved
+        db_data_file.save(update_fields=['processed_at', 'values_saved'])
+        
+        if values_saved == 0:
+            logger.warning(
+                f"File {file_name} decoded {len(file_records)} record(s) but none of its "
+                f"values were saved — check the variable mappings and the ingestion window"
+            )
     
     def get_station_file_paths(self, station_link, start_date=None, end_date=None) -> list:
         """

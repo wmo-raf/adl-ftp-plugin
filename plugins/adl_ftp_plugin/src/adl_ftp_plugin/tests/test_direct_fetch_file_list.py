@@ -147,6 +147,21 @@ class DirectFetchFileListViewTests(TestCase):
         self.assertContains(response, "Downloaded, not processed")
         self.assertContains(response, "Not downloaded")
 
+    def test_local_status_distinguishes_processed_files_that_saved_nothing(self):
+        # A green "Processed" next to a file whose values were all dropped is
+        # exactly what hid the bug this page now exists to expose
+        FTPStationDataFile.objects.create(
+            station_link=self.link, file_name="STATION1_202608171000.txt",
+            processed_at=dj_timezone.now(), values_saved=0,
+        )
+        FTPStationDataFile.objects.create(
+            station_link=self.link, file_name="STATION1_202608171010.txt",
+            processed_at=dj_timezone.now(), values_saved=25,
+        )
+        response = self._get(**{"from": "2026-08-17T10:00", "to": "2026-08-17T10:10"})
+        self.assertContains(response, "Processed, 0 values saved")
+        self.assertContains(response, "25 values")
+
     def test_filename_datetime_is_decoded_per_row(self):
         response = self._get(**{"from": "2026-08-17T10:00", "to": "2026-08-17T10:00"})
         row = response.context["rows"][0]
