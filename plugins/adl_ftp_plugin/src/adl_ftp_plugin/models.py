@@ -928,7 +928,22 @@ class FTPStationDataFile(models.Model):
     file = models.FileField(upload_to=get_ftp_data_file_upload_path, verbose_name=_("File"))
     processed = models.BooleanField(default=False, verbose_name=_("Processed"))
     variable_mappings = models.ManyToManyField(FTPVariableMapping, verbose_name=_("Variable Mappings"))
-    processed_at = models.DateTimeField(null=True, blank=True)
+    # Stamped only after ADL has persisted the file's records (the plugin
+    # yields core's FLUSH marker and resumes once the upsert is done), so a
+    # stamped file's data is in the database — barring the drops recorded in
+    # values_saved
+    processed_at = models.DateTimeField(
+        null=True, blank=True, verbose_name=_("Processed At"),
+        help_text=_("When this file's records were last handed to ADL and persisted.")
+    )
+    values_saved = models.PositiveIntegerField(
+        null=True, blank=True, verbose_name=_("Values Saved"),
+        help_text=_(
+            "Observation values ADL saved from this file the last time it was processed. "
+            "0 means the file decoded but nothing was kept — typically a variable-mapping "
+            "or ingestion-window mismatch. Empty for files processed before this was recorded."
+        )
+    )
     
     class Meta:
         verbose_name = _("Remote Station Data File")
