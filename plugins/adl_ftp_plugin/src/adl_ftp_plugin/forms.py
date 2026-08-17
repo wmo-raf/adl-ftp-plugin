@@ -51,3 +51,83 @@ class TestCSVConfigForm(forms.Form):
                 )
         
         return data_file
+
+
+class DecoderVariableMappingRowForm(forms.Form):
+    """
+    One row of the "Populate variable mappings from decoder" review form.
+
+    An empty ``file_variable_unit`` means "create a Unit for the decoder's
+    declared symbol"; an empty ``adl_parameter`` means "create a DataParameter
+    named after the decoder's label, with its declared ADL unit". Row-level
+    validation only guards against picking a parameter whose unit cannot be
+    converted from the file unit.
+    """
+    
+    include = forms.BooleanField(required=False, initial=True, label=_("Include"))
+    name = forms.CharField(widget=forms.HiddenInput)
+    file_variable_unit = forms.ModelChoiceField(
+        queryset=None,
+        required=False,
+        label=_("File Variable Unit"),
+    )
+    adl_parameter = forms.ModelChoiceField(
+        queryset=None,
+        required=False,
+        label=_("ADL Parameter"),
+    )
+    
+    def __init__(self, *args, variables_by_name=None, **kwargs):
+        from adl.core.models import DataParameter, Unit
+        
+        super().__init__(*args, **kwargs)
+        self.variables_by_name = variables_by_name or {}
+        
+        self.fields["file_variable_unit"].queryset = Unit.objects.all()
+        self.fields["adl_parameter"].queryset = DataParameter.objects.select_related("unit")
+        
+        name = self.initial.get("name")
+        if name is None and self.is_bound:
+            name = self.data.get(self.add_prefix("name"))
+        self.variable = self.variables_by_name.get(name)
+        
+        if self.variable:
+            self.fields["file_variable_unit"].empty_label = _("Create unit '%(symbol)s'") % {
+                "symbol": self.variable["unit"]
+            }
+            self.fields["adl_parameter"].empty_label = _("Create new: %(label)s (%(unit)s)") % {
+                "label": self.variable["label"],
+                "unit": self.variable["adl_unit"],
+            }
+    
+    def clean(self):
+        cleaned = super().clean()
+        variable = self.variables_by_name.get(cleaned.get("name"))
+        if variable is None:
+            raise forms.ValidationError(_("Unknown decoder variable '%(name)s'.") % {"name": cleaned.get("name")})
+        cleaned["variable"] = variable
+        
+        if not cleaned.get("include"):
+            return cleaned
+        
+        parameter = cleaned.get("adl_parameter")
+        if parameter is not None and not parameter.custom_unit_context and not parameter.is_coded:
+            file_unit = cleaned.get("file_variable_unit")
+            file_symbol = file_unit.symbol if file_unit else variable["unit"]
+            try:
+                from adl.core.units import units
+                if units(file_symbol).dimensionality != units(parameter.unit.symbol).dimensionality:
+                    self.add_error(
+                        "adl_parameter",
+                        _("'%(file)s' cannot be converted to '%(param)s'.") % {
+                            "file": file_symbol,
+                            "param": parameter.unit.symbol,
+                        },
+                    )
+            except Exception:
+                # Unknown symbol -> the unit creation step will report it
+                pass
+        return cleaned
+
+
+DecoderVariableMappingFormSet = forms.formset_factory(DecoderVariableMappingRowForm, extra=0)

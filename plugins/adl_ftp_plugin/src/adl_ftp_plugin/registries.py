@@ -39,6 +39,29 @@ class FTPDecoder(Instance):
         """
         raise NotImplementedError
     
+    def get_variables(self):
+        """
+        Declare the variables this decoder emits, so the admin can pre-populate
+        a connection's variable mappings instead of having them typed by hand.
+
+        Return a list of dicts, one per record key produced by ``decode()``::
+
+            {
+                "name": "wind_speed_2m",   # required: key emitted by decode()
+                "unit": "knot",            # required: pint symbol of the value in the file
+                "label": "Wind Speed 2m",  # optional: human name; defaults to name
+                "adl_unit": "m/s",         # optional: pint symbol for an auto-created
+                                           #   ADL DataParameter; defaults to unit
+                "description": "...",      # optional
+            }
+
+        The default (empty list) means "unknown" and hides the populate action
+        for connections using this decoder.
+
+        :rtype: list[dict]
+        """
+        return []
+    
     def get_matching_files(self, station_link, files, start_date=None, end_date=None):
         """
         Returns a list of files that match the decoder and date range.

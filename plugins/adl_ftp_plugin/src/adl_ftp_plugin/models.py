@@ -417,6 +417,17 @@ class NetworkFTP(NetworkConnection):
             }
         ]
         
+        # Offered only when the decoder declares its variables; swallows an
+        # unregistered/uninstalled decoder so the connections list never breaks.
+        from .decoder_variables import get_decoder_variables
+        if get_decoder_variables(self):
+            columns.append({
+                "label": _("Populate Variable Mappings from Decoder"),
+                "url": reverse("populate_variable_mappings_from_decoder", args=[self.id]),
+                "icon_name": "plus-inverse",
+                "kwargs": {"attrs": {}}
+            })
+        
         if self.decoder == "standard_csv" and self.csv_config:
             url = reverse(StandardCSVConfigViewSet().get_url_name("edit"), args=[self.csv_config.id])
             columns.append({
