@@ -1,14 +1,19 @@
 import logging
 import os
 import tempfile
+from datetime import datetime
 
-from adl.core.utils import get_object_or_none
+from adl.core.utils import get_object_or_none, get_url_for_station_link
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone as dj_timezone
+from django.utils.dateparse import parse_date, parse_datetime
 from django.utils.translation import gettext as _
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_GET, require_http_methods
+from wagtail.admin.paginator import WagtailPaginator
+from wagtail.permission_policies import ModelPermissionPolicy
 from wagtail.admin import messages
 
 from .decoder_variables import (
@@ -20,8 +25,8 @@ from .decoder_variables import (
 )
 from .forms import DecoderVariableMappingFormSet, TestCSVConfigForm
 from .ftp import FTPError
-from .ftp.ftp_utils import clean_remote_path, get_ftp_dir_list
-from .models import NetworkFTP
+from .ftp.ftp_utils import clean_remote_path, get_ftp_dir_list, parse_date_from_filename
+from .models import FTPListingStrategy, FTPStationDataFile, FTPStationLink, NetworkFTP
 
 logger = logging.getLogger(__name__)
 
@@ -317,3 +322,152 @@ def populate_variable_mappings_from_decoder(request, connection_id):
     }
     
     return render(request, "adl_ftp_plugin/populate_variable_mappings.html", context)
+
+
+# ---------------------------------------------------------------------------
+# Direct-fetch file list
+# ---------------------------------------------------------------------------
+
+DIRECT_FETCH_FILES_PER_PAGE = 200
+
+# The same gate Wagtail's inspect view applies to the station link model —
+# the page hangs off the inspect page and shows nothing more sensitive
+STATION_LINK_VIEW_PERMISSIONS = ["add", "change", "delete", "view"]
+
+
+def _user_can_view_station_link(user, station_link):
+    policy = ModelPermissionPolicy(type(station_link))
+    return policy.user_has_any_permission(user, STATION_LINK_VIEW_PERMISSIONS)
+
+
+def _parse_window_bound(raw, tz):
+    """
+    Parse a ``from``/``to`` query value into an aware datetime. Accepts what a
+    ``datetime-local`` input or a hand-typed ISO string produces; a bare date
+    means midnight. Naive values are read in ``tz`` (the station timezone,
+    which is what the resolved window is shown in). Returns ``(value, error)``.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return None, None
+    value = parse_datetime(raw)
+    if value is None:
+        date = parse_date(raw)
+        if date is not None:
+            value = datetime.combine(date, datetime.min.time())
+    if value is None:
+        return None, _("Could not read '%(raw)s' as a date or datetime.") % {"raw": raw}
+    if dj_timezone.is_naive(value):
+        value = dj_timezone.make_aware(value, tz)
+    return value, None
+
+
+def _direct_fetch_start_source(plugin, station_link):
+    """Which rule produced the default window start — mirrors the priority in
+    ``Plugin.get_dates_for_station()`` so the page can name it."""
+    if plugin.get_start_date_from_db(station_link):
+        return _("latest saved observation for this station")
+    if station_link.get_first_collection_date():
+        return _("the station link's Start Date")
+    return _("now (no saved observations and no Start Date set)")
+
+
+@require_GET
+def direct_fetch_file_list(request, station_link_id):
+    """
+    Preview page for a ``DIRECT_FETCH`` station link: the remote paths the
+    next ingestion run would try, in the order it would try them, plus
+    whether ADL already holds each file. Pure computation — it never opens
+    an FTP/SFTP connection, so it is safe to reload freely.
+
+    Defaults to the real next-run window; ``?from=``/``?to=`` preview a
+    different range without touching the station link.
+    """
+    station_link = get_object_or_404(FTPStationLink, pk=station_link_id)
+    if not _user_can_view_station_link(request.user, station_link):
+        raise PermissionDenied
+
+    page_title = _("Direct Fetch Files")
+    inspect_url = get_url_for_station_link(station_link, "inspect", takes_args=True)
+    context = {
+        "breadcrumbs_items": [
+            {"url": reverse("wagtailadmin_home"), "label": _("Home")},
+            {"url": get_url_for_station_link(station_link, "index"), "label": _("Station Links")},
+            {"url": inspect_url, "label": str(station_link)},
+            {"url": None, "label": page_title},
+        ],
+        "header_title": _("%(title)s — %(station)s") % {"title": page_title, "station": station_link},
+        "header_icon": "doc-full-inverse",
+        "station_link": station_link,
+        "back_url": inspect_url,
+        "is_direct_fetch": station_link.listing_strategy == FTPListingStrategy.DIRECT_FETCH,
+    }
+    if not context["is_direct_fetch"]:
+        context["strategy_label"] = station_link.get_listing_strategy_display()
+        return render(request, "adl_ftp_plugin/direct_fetch_file_list.html", context)
+
+    plugin = station_link.network_connection.get_plugin()
+    tz = station_link.timezone
+    default_start, default_end = plugin.get_dates_for_station(station_link)
+
+    errors = []
+    start_date, err = _parse_window_bound(request.GET.get("from"), tz)
+    if err:
+        errors.append(err)
+    end_date, err = _parse_window_bound(request.GET.get("to"), tz)
+    if err:
+        errors.append(err)
+    overridden = bool(start_date or end_date)
+    start_date = start_date or default_start
+    end_date = end_date or default_end
+    if start_date > end_date:
+        errors.append(_("The window start is after its end; nothing to list."))
+
+    file_paths = []
+    if not errors:
+        file_paths = plugin.get_station_file_paths(station_link, start_date, end_date)
+
+    paginator = WagtailPaginator(file_paths, DIRECT_FETCH_FILES_PER_PAGE)
+    page = paginator.get_page(request.GET.get("p"))
+
+    # Local status only for the visible page: one query, keyed by file name
+    # (the same key _process_file() uses to decide whether to download)
+    page_names = [os.path.basename(path) for path in page.object_list]
+    local_files = {
+        f.file_name: f
+        for f in FTPStationDataFile.objects.filter(
+            station_link=station_link, file_name__in=page_names
+        )
+    }
+    filename_tz = station_link.direct_fetch_datetime_timezone
+    rows = []
+    for offset, path in enumerate(page.object_list):
+        name = os.path.basename(path)
+        rows.append({
+            "index": page.start_index() + offset,
+            "path": path,
+            "directory": os.path.dirname(path),
+            "file_name": name,
+            "file_datetime": parse_date_from_filename(
+                name, station_link.direct_fetch_datetime_format, filename_tz
+            ),
+            "local_file": local_files.get(name),
+        })
+
+    context.update({
+        "errors": errors,
+        "start_date": dj_timezone.localtime(start_date, tz),
+        "end_date": dj_timezone.localtime(end_date, tz),
+        "station_tz": str(tz),
+        "window_overridden": overridden,
+        "start_source": _direct_fetch_start_source(plugin, station_link),
+        "from_value": request.GET.get("from", ""),
+        "to_value": request.GET.get("to", ""),
+        "total_files": paginator.count,
+        "total_directories": len({os.path.dirname(p) for p in file_paths}),
+        "page_obj": page,
+        "elided_page_range": paginator.get_elided_page_range(page.number),
+        "rows": rows,
+        "filename_tz": str(filename_tz),
+    })
+    return render(request, "adl_ftp_plugin/direct_fetch_file_list.html", context)

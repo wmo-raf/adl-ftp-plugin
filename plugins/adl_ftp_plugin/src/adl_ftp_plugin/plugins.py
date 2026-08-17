@@ -318,11 +318,27 @@ class AdlFtpPlugin(Plugin):
         except Exception as e:
             logger.error(f"Error decoding file {file_name}: {e}")
     
-    def get_station_file_paths(self, station_link) -> list:
+    def get_station_file_paths(self, station_link, start_date=None, end_date=None) -> list:
+        """
+        Dry run: the remote paths an ingestion run over ``[start_date,
+        end_date]`` would try, in the order it would try them, without
+        downloading or decoding anything. Either bound defaults to what
+        :meth:`get_dates_for_station` resolves for the next real run.
+
+        For ``DIRECT_FETCH`` the names are computed from the clock alone —
+        no FTP connection is opened and no decoder is required, so the
+        preview page can call this freely. Listing strategies need both.
+        """
         logger = self.get_logger()
         ftp_client = None
         try:
-            start_date, end_date = self.get_dates_for_station(station_link)
+            default_start, default_end = self.get_dates_for_station(station_link)
+            start_date = start_date or default_start
+            end_date = end_date or default_end
+            
+            if station_link.listing_strategy == FTPListingStrategy.DIRECT_FETCH:
+                return list(self._get_file_paths(station_link, None, None, start_date, end_date))
+            
             network_conn_ftp = station_link.network_connection
             decoder = self._get_configured_decoder(network_conn_ftp)
             if not decoder:

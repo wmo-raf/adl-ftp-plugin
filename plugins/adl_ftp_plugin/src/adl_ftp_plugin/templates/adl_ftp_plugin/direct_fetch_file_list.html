@@ -1,0 +1,219 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{{ header_title }}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .dff-lead {
+            margin-bottom: 1.5rem;
+        }
+
+        .dff-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+            gap: 0.75rem 1.5rem;
+            padding: 1rem 1.25rem;
+            margin-bottom: 1.5rem;
+            background: var(--w-color-surface-field);
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 4px;
+        }
+
+        .dff-summary__label {
+            display: block;
+            font-size: 0.8em;
+            color: var(--w-color-text-meta);
+        }
+
+        .dff-summary__value {
+            font-weight: 600;
+            color: var(--w-color-text-label);
+        }
+
+        .dff-summary__hint {
+            display: block;
+            font-size: 0.8em;
+            color: var(--w-color-text-meta);
+        }
+
+        .dff-window-form {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem 1rem;
+            align-items: flex-end;
+            margin-bottom: 1.5rem;
+        }
+
+        .dff-window-form label {
+            display: block;
+            font-size: 0.85em;
+            color: var(--w-color-text-meta);
+        }
+
+        .dff-window-form input[type="datetime-local"] {
+            width: auto;
+        }
+
+        .dff-mono {
+            font-family: var(--w-font-mono, monospace);
+            word-break: break-all;
+        }
+
+        .dff-muted {
+            color: var(--w-color-text-meta);
+        }
+
+        .dff-count {
+            margin: 0 0 0.75rem;
+            color: var(--w-color-text-meta);
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+    {% if not is_direct_fetch %}
+        <div class="help-block help-warning">
+            <svg class="icon icon-warning icon" aria-hidden="true"><use href="#icon-warning"></use></svg>
+            <p>
+                {% blocktrans trimmed with strategy=strategy_label %}
+                    This station link uses the <strong>{{ strategy }}</strong> listing strategy.
+                    The direct-fetch file list only applies to station links whose strategy is
+                    <strong>Direct Fetch</strong> — those construct their filenames from a time
+                    increment instead of listing the server.
+                {% endblocktrans %}
+            </p>
+        </div>
+        <p><a class="button button-secondary" href="{{ back_url }}">{% trans "Back to station link" %}</a></p>
+    {% else %}
+        <p class="dff-lead">
+            {% blocktrans trimmed %}
+                The remote paths the next ingestion run would try for this station, in the order it
+                would try them, and whether ADL already holds each file. This is a preview computed
+                from the station link's configuration only — nothing is fetched from the server.
+            {% endblocktrans %}
+        </p>
+
+        {% for error in errors %}
+            <div class="help-block help-critical">
+                <svg class="icon icon-warning icon" aria-hidden="true"><use href="#icon-warning"></use></svg>
+                <p>{{ error }}</p>
+            </div>
+        {% endfor %}
+
+        <div class="dff-summary">
+            <div>
+                <span class="dff-summary__label">{% trans "Window" %}</span>
+                <span class="dff-summary__value">{{ start_date|date:"Y-m-d H:i" }} → {{ end_date|date:"Y-m-d H:i" }}</span>
+                <span class="dff-summary__hint">
+                    {{ station_tz }}
+                    {% if window_overridden %}
+                        · {% trans "custom range" %}
+                    {% else %}
+                        · {% blocktrans trimmed with source=start_source %}start from {{ source }}{% endblocktrans %}
+                    {% endif %}
+                </span>
+            </div>
+            <div>
+                <span class="dff-summary__label">{% trans "Files" %}</span>
+                <span class="dff-summary__value">{{ total_files }}</span>
+                <span class="dff-summary__hint">
+                    {% blocktrans trimmed count dirs=total_directories %}
+                        in {{ dirs }} directory
+                    {% plural %}
+                        across {{ dirs }} directories
+                    {% endblocktrans %}
+                </span>
+            </div>
+            <div>
+                <span class="dff-summary__label">{% trans "Filename" %}</span>
+                <span class="dff-summary__value dff-mono">{{ station_link.direct_fetch_prefix }}&lt;{{ station_link.direct_fetch_datetime_format }}&gt;{{ station_link.direct_fetch_file_extension }}</span>
+                <span class="dff-summary__hint">
+                    {% blocktrans trimmed with minutes=station_link.direct_fetch_interval_minutes tz=filename_tz %}
+                        every {{ minutes }} min · filename datetime in {{ tz }}
+                    {% endblocktrans %}
+                </span>
+            </div>
+            <div>
+                <span class="dff-summary__label">{% trans "Base path" %}</span>
+                <span class="dff-summary__value dff-mono">{{ station_link.ftp_path }}</span>
+                {% if station_link.dir_structured_by_date %}
+                    <span class="dff-summary__hint">
+                        {% blocktrans trimmed with granularity=station_link.date_granularity %}
+                            structured by date ({{ granularity }})
+                        {% endblocktrans %}
+                    </span>
+                {% endif %}
+            </div>
+        </div>
+
+        <form method="get" class="dff-window-form">
+            <div>
+                <label for="dff-from">{% trans "From" %}</label>
+                <input type="datetime-local" id="dff-from" name="from" value="{{ from_value }}">
+            </div>
+            <div>
+                <label for="dff-to">{% trans "To" %}</label>
+                <input type="datetime-local" id="dff-to" name="to" value="{{ to_value }}">
+            </div>
+            <button type="submit" class="button">{% trans "Preview range" %}</button>
+            {% if window_overridden %}
+                <a class="button button-secondary" href="?">{% trans "Reset to next-run window" %}</a>
+            {% endif %}
+        </form>
+
+        {% if rows %}
+            <p class="dff-count">
+                {% blocktrans trimmed with first=page_obj.start_index last=page_obj.end_index total=total_files %}
+                    Showing {{ first }}–{{ last }} of {{ total }}
+                {% endblocktrans %}
+            </p>
+            <table class="listing">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>{% trans "Remote path" %}</th>
+                        <th>{% trans "Filename datetime" %}</th>
+                        <th>{% trans "Local status" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            <td>{{ row.index }}</td>
+                            <td class="dff-mono">{{ row.path }}</td>
+                            <td>
+                                {% if row.file_datetime %}
+                                    {{ row.file_datetime|date:"Y-m-d H:i" }}
+                                {% else %}
+                                    <span class="dff-muted">—</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if row.local_file %}
+                                    {% if row.local_file.processed_at %}
+                                        <span class="status-badge status-badge--success">{% trans "Processed" %}</span>
+                                        <span class="dff-muted">{{ row.local_file.processed_at|date:"Y-m-d H:i" }}</span>
+                                    {% else %}
+                                        <span class="status-badge status-badge--warning">{% trans "Downloaded, not processed" %}</span>
+                                    {% endif %}
+                                {% else %}
+                                    <span class="dff-muted">{% trans "Not downloaded" %}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% if page_obj.has_other_pages %}
+                {% include "wagtailadmin/shared/pagination_nav.html" with items=page_obj %}
+            {% endif %}
+        {% elif not errors %}
+            <div class="help-block help-info">
+                <svg class="icon icon-help icon" aria-hidden="true"><use href="#icon-help"></use></svg>
+                <p>{% trans "No filenames fall in this window. Check the interval, the datetime format and the window bounds." %}</p>
+            </div>
+        {% endif %}
+    {% endif %}
+{% endblock %}

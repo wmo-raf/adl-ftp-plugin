@@ -8,6 +8,7 @@ from wagtail.snippets.views.snippets import SnippetViewSet
 
 from .models import FTPStationDataFile
 from .views import (
+    direct_fetch_file_list,
     get_ftp_connection_dir_list,
     populate_variable_mappings_from_decoder,
 )
@@ -29,6 +30,9 @@ def urlconf_adl_ftp_plugin():
         path("adl-ftp-plugin/connections/<int:connection_id>/populate-variable-mappings/",
              populate_variable_mappings_from_decoder,
              name="populate_variable_mappings_from_decoder"),
+        path("adl-ftp-plugin/station-links/<int:station_link_id>/direct-fetch-files/",
+             direct_fetch_file_list,
+             name="ftp_direct_fetch_file_list"),
     ]
 
 
