@@ -147,6 +147,19 @@ class DirectFetchFileListViewTests(TestCase):
         self.assertContains(response, "Downloaded, not processed")
         self.assertContains(response, "Not downloaded")
 
+    def test_filename_summary_renders_the_configured_pattern(self):
+        response = self._get(**{"from": "2026-08-17T10:00", "to": "2026-08-17T10:10"})
+        self.assertContains(response, "STATION1_&lt;YYYYMMDDHHMM&gt;.txt")
+        self.assertNotContains(response, "{{")
+        self.assertNotContains(response, "{%")
+
+    def test_empty_window_message_renders_translated(self):
+        # A window entirely in the future generates no filenames (nothing is
+        # generated beyond now) → the empty-state block shows
+        response = self._get(**{"from": "2099-01-01T10:00", "to": "2099-01-01T10:10"})
+        self.assertContains(response, "No filenames fall in this window")
+        self.assertNotContains(response, "{%")
+
     def test_local_status_distinguishes_processed_files_that_saved_nothing(self):
         # A green "Processed" next to a file whose values were all dropped is
         # exactly what hid the bug this page now exists to expose
@@ -409,3 +422,21 @@ class DirectFetchFileCheckViewTests(TestCase):
         self.assertTrue(page.context["can_check_remote"])
         self.assertContains(page, 'data-path="/data/station1/STATION1_202608171000.txt"')
         self.assertContains(page, self.url)
+
+
+class TemplateTagsDoNotSpanLinesTests(SimpleTestCase):
+    """Django's template lexer matches ``{{ … }}`` / ``{% … %}`` on a single
+    line only; a tag broken across lines by a formatter is emitted as literal
+    text (the ``{{`` shows up in the page). This guards every plugin template."""
+
+    def test_no_tag_is_split_across_lines(self):
+        import pathlib
+        template_dir = pathlib.Path(__file__).resolve().parent.parent / "templates"
+        offenders = []
+        for path in sorted(template_dir.rglob("*.html")):
+            for lineno, line in enumerate(path.read_text().splitlines(), 1):
+                for opener, closer in (("{{", "}}"), ("{%", "%}")):
+                    idx = line.rfind(opener)
+                    if idx != -1 and closer not in line[idx:]:
+                        offenders.append(f"{path.relative_to(template_dir)}:{lineno}: {line.strip()}")
+        self.assertEqual(offenders, [], "\n".join(offenders))
