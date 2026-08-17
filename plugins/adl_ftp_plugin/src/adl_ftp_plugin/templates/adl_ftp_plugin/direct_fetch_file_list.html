@@ -166,8 +166,7 @@
     </div>
     <div>
         <span class="dff-summary__label">{% trans "Filename" %}</span>
-        <span class="dff-summary__value dff-mono">{{ station_link.direct_fetch_prefix }}&lt;{{
-            station_link.direct_fetch_datetime_format }}&gt;{{ station_link.direct_fetch_file_extension }}</span>
+        <span class="dff-summary__value dff-mono">{{ station_link.direct_fetch_prefix }}&lt;{{ station_link.direct_fetch_datetime_format }}&gt;{{ station_link.direct_fetch_file_extension }}</span>
         <span class="dff-summary__hint">
             {% blocktrans trimmed with minutes=station_link.direct_fetch_interval_minutes tz=filename_tz %}
             every {{ minutes }} min · filename datetime in {{ tz }}
@@ -276,8 +275,7 @@
     <svg class="icon icon-help icon" aria-hidden="true">
         <use href="#icon-help"></use>
     </svg>
-    <p>{% trans "No filenames fall in this window. Check the interval, the datetime format and the window bounds."
-        %}</p>
+    <p>{% trans "No filenames fall in this window. Check the interval, the datetime format and the window bounds." %}</p>
 </div>
 {% endif %}
 {% endif %}
