@@ -3,12 +3,22 @@ import os
 import tempfile
 
 from adl.core.utils import get_object_or_none
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import JsonResponse
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 from wagtail.admin import messages
 
-from .forms import TestCSVConfigForm
+from .decoder_variables import (
+    create_variable_mappings,
+    find_parameter_for_variable,
+    find_unit_by_symbol,
+    get_decoder_variables,
+    get_unmapped_decoder_variables,
+)
+from .forms import DecoderVariableMappingFormSet, TestCSVConfigForm
 from .ftp import FTPError
 from .ftp.ftp_utils import clean_remote_path, get_ftp_dir_list
 from .models import NetworkFTP
@@ -204,3 +214,106 @@ def test_decoder_config(request):
     }
     
     return render(request, 'adl_ftp_plugin/test_decoder_config.html', context)
+
+
+def _user_can_manage_connection(user, connection):
+    try:
+        from adl.core.permissions import can_manage_connection
+    except ImportError:  # older core without the helper
+        return user.is_superuser or user.has_perm("adl_ftp_plugin.change_networkftp")
+    return can_manage_connection(user, connection)
+
+
+@require_http_methods(["GET", "POST"])
+def populate_variable_mappings_from_decoder(request, connection_id):
+    """
+    Review-and-create page that seeds a connection's variable mappings from the
+    variables its decoder declares via ``FTPDecoder.get_variables()``.
+
+    GET renders one row per declared variable that is not yet mapped, with the
+    file unit and ADL parameter pre-selected where an existing match is found.
+    POST creates the missing units/parameters and the mapping rows in one
+    transaction, then returns to the connection edit page.
+    """
+    connection = get_object_or_404(NetworkFTP, pk=connection_id)
+    
+    if not _user_can_manage_connection(request.user, connection):
+        raise PermissionDenied
+    
+    variables = get_decoder_variables(connection)
+    if not variables:
+        messages.warning(
+            request,
+            _("Decoder '%(decoder)s' does not declare any variables, so mappings cannot be pre-populated.") % {
+                "decoder": connection.decoder
+            },
+        )
+        return redirect(connection.edit_url)
+    
+    unmapped = get_unmapped_decoder_variables(connection, variables)
+    variables_by_name = {v["name"]: v for v in variables}
+    form_kwargs = {"variables_by_name": variables_by_name}
+    
+    if request.method == "POST":
+        formset = DecoderVariableMappingFormSet(request.POST, form_kwargs=form_kwargs)
+        if formset.is_valid():
+            rows = [
+                {
+                    "variable": form.cleaned_data["variable"],
+                    "file_variable_unit": form.cleaned_data.get("file_variable_unit"),
+                    "adl_parameter": form.cleaned_data.get("adl_parameter"),
+                }
+                for form in formset
+                if form.cleaned_data.get("include")
+            ]
+            try:
+                summary = create_variable_mappings(connection, rows)
+            except ValidationError as e:
+                messages.error(request, _("Could not create variable mappings: %(error)s") % {
+                    "error": "; ".join(e.messages)
+                })
+            else:
+                messages.success(
+                    request,
+                    _("Created %(created)s variable mapping(s) — %(units)s new unit(s), "
+                      "%(params)s new parameter(s); %(skipped)s already mapped.") % {
+                        "created": summary["created"],
+                        "units": len(summary["units_created"]),
+                        "params": len(summary["parameters_created"]),
+                        "skipped": summary["skipped_existing"],
+                    },
+                )
+                return redirect(connection.edit_url)
+    else:
+        initial = [
+            {
+                "name": v["name"],
+                "include": True,
+                "file_variable_unit": find_unit_by_symbol(v["unit"]),
+                "adl_parameter": find_parameter_for_variable(v),
+            }
+            for v in unmapped
+        ]
+        formset = DecoderVariableMappingFormSet(initial=initial, form_kwargs=form_kwargs)
+    
+    rows = [(form, form.variable) for form in formset]
+    page_title = _("Populate variable mappings from decoder")
+    
+    context = {
+        "breadcrumbs_items": [
+            {"url": reverse("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse("connections_list"), "label": _("Network Connections")},
+            {"url": connection.edit_url, "label": connection.name},
+            {"url": None, "label": page_title},
+        ],
+        "header_title": page_title,
+        "header_icon": "cog",
+        "connection": connection,
+        "decoder_name": connection.get_decoder_display(),
+        "formset": formset,
+        "rows": rows,
+        "total_variables": len(variables),
+        "already_mapped_count": len(variables) - len(unmapped),
+    }
+    
+    return render(request, "adl_ftp_plugin/populate_variable_mappings.html", context)

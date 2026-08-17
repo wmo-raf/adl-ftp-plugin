@@ -1,0 +1,187 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{{ header_title }} — {{ connection.name }}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .decoder-vars-intro {
+            margin-bottom: 1.5rem;
+        }
+
+        .decoder-vars-table td,
+        .decoder-vars-table th {
+            vertical-align: top;
+        }
+
+        .decoder-vars-table select {
+            max-width: 100%;
+        }
+
+        .decoder-vars-name {
+            font-family: var(--w-font-mono, monospace);
+        }
+
+        .decoder-vars-hint {
+            display: block;
+            color: var(--w-color-text-meta);
+            font-size: 0.85em;
+            margin-top: 0.25rem;
+        }
+
+        .decoder-vars-errors {
+            color: var(--w-color-critical-200);
+            font-size: 0.85em;
+            margin: 0.25rem 0 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .decoder-vars-actions {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            margin-top: 1.5rem;
+        }
+
+        .decoder-vars-toggle {
+            margin-left: auto;
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+    <div class="help-block help-info decoder-vars-intro">
+        {% icon name="help" %}
+        <p>
+            {% blocktrans trimmed with decoder=decoder_name mapped=already_mapped_count total=total_variables %}
+                Decoder <strong>{{ decoder }}</strong> declares {{ total }} variables; {{ mapped }} are already
+                mapped on this connection. The rows below are the unmapped ones.
+            {% endblocktrans %}
+            <br>
+            {% blocktrans trimmed %}
+                Untick a row to skip it. Leaving a select on its “Create …” option creates that Unit or Data
+                Parameter on submit; pick an existing one to reuse it instead. Nothing is created until you submit.
+            {% endblocktrans %}
+        </p>
+    </div>
+
+    {% if not rows %}
+        <div class="help-block help-info">
+            {% icon name="success" %}
+            <p>{% translate "All variables declared by this decoder are already mapped on this connection." %}</p>
+        </div>
+        <div class="decoder-vars-actions">
+            <a class="button button-secondary" href="{{ connection.edit_url }}">
+                {% translate "Back to connection" %}
+            </a>
+        </div>
+    {% else %}
+        <form method="post" action="">
+            {% csrf_token %}
+            {{ formset.management_form }}
+
+            {% if formset.non_form_errors %}
+                <div class="help-block help-critical">
+                    {% icon name="warning" %}
+                    <ul class="decoder-vars-errors">
+                        {% for error in formset.non_form_errors %}
+                            <li>{{ error }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
+
+            <table class="listing decoder-vars-table">
+                <thead>
+                <tr>
+                    <th>{% translate "Include" %}</th>
+                    <th>{% translate "File Variable" %}</th>
+                    <th>{% translate "File Variable Unit" %}</th>
+                    <th>{% translate "ADL Parameter" %}</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for form, variable in rows %}
+                    <tr>
+                        <td>
+                            {{ form.name }}
+                            {{ form.include }}
+                        </td>
+                        <td>
+                            <span class="decoder-vars-name">{{ variable.name }}</span>
+                            <span class="decoder-vars-hint">
+                                {{ variable.label }}{% if variable.description %} — {{ variable.description }}{% endif %}
+                            </span>
+                        </td>
+                        <td>
+                            {{ form.file_variable_unit }}
+                            <span class="decoder-vars-hint">
+                                {% blocktrans trimmed with symbol=variable.unit %}Declared: {{ symbol }}{% endblocktrans %}
+                            </span>
+                            {% if form.file_variable_unit.errors %}
+                                <ul class="decoder-vars-errors">
+                                    {% for error in form.file_variable_unit.errors %}<li>{{ error }}</li>{% endfor %}
+                                </ul>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {{ form.adl_parameter }}
+                            <span class="decoder-vars-hint">
+                                {% blocktrans trimmed with label=variable.label unit=variable.adl_unit %}
+                                    Default: {{ label }} ({{ unit }})
+                                {% endblocktrans %}
+                            </span>
+                            {% if form.adl_parameter.errors %}
+                                <ul class="decoder-vars-errors">
+                                    {% for error in form.adl_parameter.errors %}<li>{{ error }}</li>{% endfor %}
+                                </ul>
+                            {% endif %}
+                            {% if form.non_field_errors %}
+                                <ul class="decoder-vars-errors">
+                                    {% for error in form.non_field_errors %}<li>{{ error }}</li>{% endfor %}
+                                </ul>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+
+            <div class="decoder-vars-actions">
+                <button type="submit" class="button button-primary">
+                    {% translate "Create mappings" %}
+                </button>
+                <a class="button button-secondary" href="{{ connection.edit_url }}">
+                    {% translate "Cancel" %}
+                </a>
+                <button type="button" class="button button-small button-secondary decoder-vars-toggle"
+                        data-decoder-vars-toggle>
+                    {% translate "Select all / none" %}
+                </button>
+            </div>
+        </form>
+    {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const toggle = document.querySelector('[data-decoder-vars-toggle]');
+            if (!toggle) {
+                return;
+            }
+            toggle.addEventListener('click', function () {
+                const boxes = document.querySelectorAll('.decoder-vars-table input[type="checkbox"]');
+                const allChecked = Array.from(boxes).every(function (box) {
+                    return box.checked;
+                });
+                boxes.forEach(function (box) {
+                    box.checked = !allChecked;
+                });
+            });
+        });
+    </script>
+{% endblock %}

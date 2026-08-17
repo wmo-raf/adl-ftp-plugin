@@ -8,7 +8,8 @@ from wagtail.snippets.views.snippets import SnippetViewSet
 
 from .models import FTPStationDataFile
 from .views import (
-    get_ftp_connection_dir_list
+    get_ftp_connection_dir_list,
+    populate_variable_mappings_from_decoder,
 )
 from .viewsets import FTPSettingsViewSetGroup, standard_csv_config_chooser_viewset
 
@@ -25,6 +26,9 @@ def urlconf_adl_ftp_plugin():
     return [
         path("adl-ftp-plugin/conn-ftp-list/", get_ftp_connection_dir_list,
              name="get_ftp_connection_dir_list"),
+        path("adl-ftp-plugin/connections/<int:connection_id>/populate-variable-mappings/",
+             populate_variable_mappings_from_decoder,
+             name="populate_variable_mappings_from_decoder"),
     ]
 
 

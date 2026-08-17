@@ -134,5 +134,44 @@ The plugin provides a few inbuilt decoders for different data formats. These inc
 
 You can also create your own decoder and use it with the plugin.
 
+#### Declaring decoder variables
+
+A decoder can declare the variables it emits by overriding `get_variables()` on the `FTPDecoder` subclass. Each entry
+describes one key that `decode()` puts in a record:
+
+```python
+class MyDecoder(FTPDecoder):
+    type = "my_decoder"
+
+    def get_variables(self):
+        return [
+            {"name": "air_temperature_2m", "unit": "°C", "label": "Air Temperature 2m"},
+            # file value in knots, ADL parameter (auto-created if missing) in m/s
+            {"name": "wind_speed_2m", "unit": "knot", "label": "Wind Speed 2m", "adl_unit": "m/s"},
+            {"name": "wind_direction_2m", "unit": "degree", "aggregation_method": "circular"},
+        ]
+```
+
+- `name` (required) — the record key emitted by `decode()`; becomes the mapping's *File Variable Name*.
+- `unit` (required) — pint symbol of the value as it appears in the file; becomes the *File Variable Unit*.
+- `label` — human name; used as the `DataParameter` name when one has to be created. Defaults to `name`.
+- `adl_unit` — pint symbol for an auto-created `DataParameter`. Defaults to `unit`.
+- `aggregation_method`, `custom_unit_context`, `description` — optional, passed through when a parameter is created.
+
+#### Populate variable mappings from a decoder
+
+When a connection uses a decoder that declares variables, its row in the *Network Connections* list gets an extra
+**Populate Variable Mappings from Decoder** action (next to *Test Decoder Configuration*). It opens a review page with
+one row per declared variable that is not yet mapped on the connection:
+
+- *File Variable Unit* is pre-selected when an existing Unit has the declared symbol (or a pint-equivalent one, e.g.
+  `degC` for `°C`); otherwise the row offers *Create unit '…'*.
+- *ADL Parameter* is pre-selected when a Data Parameter with the same name as the label (or the variable name)
+  exists; otherwise the row offers *Create new: <label> (<adl_unit>)*.
+
+Untick rows you do not want, override any select, and submit. Missing Units and Data Parameters are created and the
+connection-level variable mappings are added in one transaction. Re-running the action only shows variables that are
+still unmapped, so it is safe to repeat.
+
 
 
