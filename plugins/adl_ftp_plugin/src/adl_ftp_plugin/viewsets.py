@@ -29,7 +29,7 @@ class TestDecoderConfigViewSet(ViewSet):
     menu_label = "Test Decoder Config"
     icon = "cog"
     name = "adl-ftp-plugin/test-decoder-config"
-    
+
     def get_urlpatterns(self):
         return [
             path('', test_decoder_config, name='test_decoder_config'),
@@ -41,7 +41,7 @@ class FTPSettingsViewSetGroup(ViewSetGroup):
     menu_icon = "cog"
     add_to_settings_menu = True
     menu_order = 900
-    
+
     items = [
         StandardCSVConfigViewSet(),
         TestDecoderConfigViewSet(),

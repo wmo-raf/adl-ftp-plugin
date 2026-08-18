@@ -76,12 +76,12 @@ class HostKeyPolicy(models.TextChoices):
 
 class StandardCSVConfig(models.Model):
     """Configuration for standard CSV file format"""
-    
+
     DATETIME_MODE_CHOICES = [
         ("single", _("Single datetime column")),
         ("separate", _("Separate date and time columns")),
     ]
-    
+
     # Common datetime format choices
     DATETIME_FORMAT_CHOICES = [
         ("%Y-%m-%d %H:%M:%S", "2025-01-15 14:30:45 (YYYY-MM-DD HH:MM:SS - ISO 8601)"),
@@ -109,7 +109,7 @@ class StandardCSVConfig(models.Model):
         ("%d/%m/%Y %I:%M:%S %p", "15/01/2025 02:30:45 PM (DD/MM/YYYY 12-hour with AM/PM)"),
         ("%a, %d %b %Y %H:%M:%S", "Wed, 15 Jan 2025 14:30:45 (RFC 2822)"),
     ]
-    
+
     # Common date format choices
     DATE_FORMAT_CHOICES = [
         ("%Y-%m-%d", "2025-01-15 (YYYY-MM-DD - ISO 8601)"),
@@ -131,7 +131,7 @@ class StandardCSVConfig(models.Model):
         ("%y-%m-%d", "25-01-15 (YY-MM-DD - 2-digit year)"),
         ("%y%m%d", "250115 (YYMMDD - compact 2-digit year)"),
     ]
-    
+
     # Common time format choices
     TIME_FORMAT_CHOICES = [
         ("%H:%M:%S", "14:30:45 (HH:MM:SS - 24-hour with seconds)"),
@@ -146,7 +146,7 @@ class StandardCSVConfig(models.Model):
         ("%H.%M.%S", "14.30.45 (HH.MM.SS - dot separator)"),
         ("%H.%M", "14.30 (HH.MM - dot separator, no seconds)"),
     ]
-    
+
     DELIMITER_CHOICES = [
         (",", "Comma (,)"),
         ("\t", "Tab (\\t)"),
@@ -155,13 +155,13 @@ class StandardCSVConfig(models.Model):
         (" ", "Space ( )"),
         (":", "Colon (:)"),
     ]
-    
+
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("Created At"))
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_("Updated At"))
-    
+
     name = models.CharField(max_length=255, verbose_name=_("Configuration Name"),
                             help_text=_("A descriptive name for this CSV configuration"))
-    
+
     # CSV structure
     has_header = models.BooleanField(
         default=True,
@@ -169,7 +169,7 @@ class StandardCSVConfig(models.Model):
         help_text=_("Check if the first row (after skipped rows) contains column names. "
                     "If unchecked, columns will be named as column_1, column_2, etc.")
     )
-    
+
     # Datetime configuration
     datetime_mode = models.CharField(
         max_length=20,
@@ -178,7 +178,7 @@ class StandardCSVConfig(models.Model):
         verbose_name=_("Datetime Mode"),
         help_text=_("Whether datetime is in one column or split into date and time columns")
     )
-    
+
     # Single column mode
     datetime_column = models.CharField(
         max_length=255,
@@ -194,7 +194,7 @@ class StandardCSVConfig(models.Model):
         verbose_name=_("Datetime Format"),
         help_text=_("Select the format that matches your datetime column")
     )
-    
+
     # Separate columns mode
     date_column = models.CharField(
         max_length=255,
@@ -224,7 +224,7 @@ class StandardCSVConfig(models.Model):
         verbose_name=_("Time Format"),
         help_text=_("Select the format that matches your time column")
     )
-    
+
     # CSV parsing options
     delimiter = models.CharField(
         max_length=5,
@@ -238,10 +238,10 @@ class StandardCSVConfig(models.Model):
         verbose_name=_("Skip Rows"),
         help_text=_("Number of rows to skip before the header row")
     )
-    
+
     no_data_value = models.FloatField(blank=True, null=True, verbose_name=_("No Data Value"),
                                       help_text=_("Value used in the data, to indicate a missing observation"))
-    
+
     panels = [
         FieldPanel("name"),
         MultiFieldPanel([
@@ -264,18 +264,18 @@ class StandardCSVConfig(models.Model):
             FieldPanel("time_format"),
         ], heading=_("Separate Columns Mode Settings")),
     ]
-    
+
     class Meta:
         verbose_name = _("CSV Decoder Configuration")
         verbose_name_plural = _("CSV Decoder Configurations")
-    
+
     def __str__(self):
         return self.name
-    
+
     def clean(self):
         """Validate configuration based on datetime mode"""
         super().clean()
-        
+
         if self.datetime_mode == "single":
             if not self.datetime_column:
                 raise ValidationError({
@@ -292,7 +292,7 @@ class StandardCSVConfig(models.Model):
 class NetworkFTP(NetworkConnection):
     """Flexible network connection supporting FTP, FTPS, and SFTP"""
     station_link_model_string_label = "adl_ftp_plugin.FTPStationLink"
-    
+
     # Basic connection details
     connection_type = models.CharField(
         max_length=10,
@@ -307,13 +307,13 @@ class NetworkFTP(NetworkConnection):
     username = models.CharField(max_length=255, verbose_name=_("Username"))
     password = models.CharField(max_length=255, verbose_name=_("Password"), blank=True,
                                 help_text=_("Required for FTP/FTPS, optional for SFTP with key auth"))
-    
+
     # FTP/FTPS specific settings
     passive_mode = models.BooleanField(default=True, verbose_name=_("Use FTP Passive mode"),
                                        help_text=_("Only applies to FTP/FTPS connections"))
     secure = models.BooleanField(default=False, verbose_name=_("Secure (FTPS)"),
                                  help_text=_("Use TLS encryption for FTP. Only applies to FTP connections"))
-    
+
     # SFTP specific settings
     private_key_file = models.CharField(max_length=500, blank=True, verbose_name=_("Private Key File Path"),
                                         help_text=_(
@@ -335,11 +335,11 @@ class NetworkFTP(NetworkConnection):
         verbose_name=_("Allow SSH Agent"),
         help_text=_("Use SSH agent for authentication if available. SFTP only")
     )
-    
+
     # Common settings
     timeout = models.IntegerField(default=20, verbose_name=_("Connection Timeout (seconds)"))
     decoder = models.CharField(max_length=255, choices=get_ftp_decoder_choices, verbose_name=_("Decoder"))
-    
+
     csv_config = models.ForeignKey(
         StandardCSVConfig,
         on_delete=models.SET_NULL,
@@ -348,7 +348,7 @@ class NetworkFTP(NetworkConnection):
         verbose_name=_("CSV Configuration"),
         help_text=_("Configuration for standard CSV files")
     )
-    
+
     panels = NetworkConnection.panels + [
         FieldPanel("connection_type", widget=ConnectionTypeRadioSelect),
         MultiFieldPanel([
@@ -372,19 +372,19 @@ class NetworkFTP(NetworkConnection):
         FieldPanel("csv_config"),
         InlinePanel("variable_mappings", label=_("Variable Mapping"), heading=_("Variable Mappings")),
     ]
-    
+
     class Meta:
         verbose_name = _("Network FTP/SFTP")
         verbose_name_plural = _("Network FTP/SFTPs")
-    
+
     def get_decoder(self):
         from adl_ftp_plugin.registries import ftp_decoder_registry
         return ftp_decoder_registry.get(self.decoder)
-    
+
     def clean(self):
         """Validate connection settings based on connection type"""
         super().clean()
-        
+
         if self.connection_type == ConnectionType.SFTP:
             if not self.password and not self.private_key_file:
                 raise ValidationError({
@@ -395,19 +395,19 @@ class NetworkFTP(NetworkConnection):
                 raise ValidationError({
                     'password': _("Password is required for FTP/FTPS connections")
                 })
-        
+
         # Validate decoder-specific requirements
         if self.decoder == "standard_csv":
             if not self.csv_config:
                 raise ValidationError({
                     'csv_config': _("CSV Configuration is required when using 'Standard CSV' decoder")
                 })
-    
+
     def get_extra_model_admin_links(self):
         from .viewsets import StandardCSVConfigViewSet, TestDecoderConfigViewSet
         url = TestDecoderConfigViewSet().menu_url
         url = f"{url}?connection_id={self.id}"
-        
+
         columns = [
             {
                 "label": _("Test Decoder Configuration"),
@@ -416,7 +416,7 @@ class NetworkFTP(NetworkConnection):
                 "kwargs": {"attrs": {"target": "_blank"}}
             }
         ]
-        
+
         # Offered only when the decoder declares its variables; swallows an
         # unregistered/uninstalled decoder so the connections list never breaks.
         from .decoder_variables import get_decoder_variables
@@ -427,7 +427,7 @@ class NetworkFTP(NetworkConnection):
                 "icon_name": "plus-inverse",
                 "kwargs": {"attrs": {}}
             })
-        
+
         if self.decoder == "standard_csv" and self.csv_config:
             url = reverse(StandardCSVConfigViewSet().get_url_name("edit"), args=[self.csv_config.id])
             columns.append({
@@ -436,9 +436,9 @@ class NetworkFTP(NetworkConnection):
                 "icon_name": "doc-full",
                 "kwargs": {"attrs": {"target": "_blank"}}
             })
-        
+
         return columns
-    
+
     @property
     def default_port(self):
         """Get default port based on connection type"""
@@ -448,12 +448,12 @@ class NetworkFTP(NetworkConnection):
             ConnectionType.SFTP: 22,
         }
         return defaults.get(self.connection_type, 21)
-    
+
     @property
     def effective_port(self):
         """Get the port to use (specified or default)"""
         return self.port if self.port else self.default_port
-    
+
     @property
     def ftp_connection_details(self):
         """Get connection details for FTP/FTPS clients"""
@@ -466,7 +466,7 @@ class NetworkFTP(NetworkConnection):
             "secure": self.secure and self.connection_type == ConnectionType.FTPS,
             "timeout": self.timeout,
         }
-    
+
     @property
     def sftp_connection_details(self):
         """Get connection details for SFTP clients"""
@@ -479,14 +479,14 @@ class NetworkFTP(NetworkConnection):
             "look_for_keys": self.look_for_keys,
             "allow_agent": self.allow_agent,
         }
-        
+
         if self.password:
             details["password"] = self.password
         if self.private_key_file:
             details["private_key"] = self.private_key_file
-        
+
         return details
-    
+
     def get_client(self):
         """Get appropriate client based on connection type"""
         if self.connection_type == ConnectionType.SFTP:
@@ -527,18 +527,18 @@ class FTPVariableMapping(Orderable):
     adl_parameter = models.ForeignKey(DataParameter, on_delete=models.CASCADE, verbose_name=_("ADL Parameter"))
     file_variable_name = models.CharField(max_length=255, verbose_name=_("File Variable Name"))
     file_variable_unit = models.ForeignKey(Unit, on_delete=models.CASCADE, verbose_name=_("File Variable Unit"))
-    
+
     panels = [
         FieldPanel("adl_parameter"),
         FieldPanel("file_variable_name"),
         FieldPanel("file_variable_unit"),
     ]
-    
+
     @property
     def source_parameter_name(self):
         """Returns the shortcode of the variable."""
         return self.file_variable_name
-    
+
     @property
     def source_parameter_unit(self):
         """Returns the unit of the variable."""
@@ -553,14 +553,14 @@ class FTPListingStrategy(models.TextChoices):
 
 class FTPStationLink(StationLink):
     extra_list_display = ["ftp_path", "file_pattern", "start_date"]
-    
+
     DATE_GRANULARITY_CHOICES = [
         ("year", _("Year")),
         ("month", _("Month")),
         ("day", _("Day")),
         ("hour", _("Hour")),
     ]
-    
+
     MONTH_FORMAT_CHOICES = [
         ("m", _("Month, 2 digits with leading zeros. '01' to '12'")),
         ("n", _("Month without leading zeros. '1' to '12'")),
@@ -569,7 +569,7 @@ class FTPStationLink(StationLink):
         ("F", _("Month, textual, full. 'January'")),
         ("f", _("Month, textual, full, lowercase. 'january'")),
     ]
-    
+
     # -------------------------------------------------------------------------
     # Remote Configuration — shared by all strategies
     # -------------------------------------------------------------------------
@@ -582,7 +582,7 @@ class FTPStationLink(StationLink):
         verbose_name=_("File Pattern"),
         help_text=_("Glob pattern to match files e.g. 'Station1_*.dat'. Not required for Direct Fetch.")
     )
-    
+
     # -------------------------------------------------------------------------
     # Directory Structure — shared by all strategies, about file organization
     # -------------------------------------------------------------------------
@@ -607,11 +607,11 @@ class FTPStationLink(StationLink):
         choices=MONTH_FORMAT_CHOICES,
         default="m", verbose_name=_("Month directory Format"),
     )
-    
+
     # -------------------------------------------------------------------------
     # Listing Strategy — drives which fields below are used
     # -------------------------------------------------------------------------
-    
+
     listing_strategy = models.CharField(
         max_length=40,
         choices=FTPListingStrategy.choices,
@@ -624,7 +624,7 @@ class FTPStationLink(StationLink):
             "'Direct Fetch' for predictable time-incremented filenames — skips listing entirely."
         )
     )
-    
+
     # -------------------------------------------------------------------------
     # Filter by Date — only used when listing_strategy = filter_by_date
     # -------------------------------------------------------------------------
@@ -641,7 +641,7 @@ class FTPStationLink(StationLink):
         verbose_name=_("Filename Date Timezone"),
         help_text=_("Timezone to use when parsing dates from filenames")
     )
-    
+
     # -------------------------------------------------------------------------
     # Direct Fetch — only used when listing_strategy = direct_fetch
     # -------------------------------------------------------------------------
@@ -688,7 +688,7 @@ class FTPStationLink(StationLink):
         verbose_name=_("File Extension"),
         help_text=_("File extension including the dot. e.g. '.txt', '.csv'")
     )
-    
+
     # -------------------------------------------------------------------------
     # Data Collection — shared by all strategies
     # -------------------------------------------------------------------------
@@ -710,7 +710,7 @@ class FTPStationLink(StationLink):
         verbose_name=_("Skip processing already processed files"),
         help_text=_("Do not process files that have already been processed")
     )
-    
+
     panels = StationLink.panels + [
         MultiFieldPanel([
             FieldPanel("ftp_path", widget=FTPDirectoryTreeSelectWidget()),
@@ -749,17 +749,17 @@ class FTPStationLink(StationLink):
             )
         ),
     ] + StationLink.aggregation_panels
-    
+
     class Meta:
         verbose_name = _("FTP/SFTP Station Link")
         verbose_name_plural = _("FTP/SFTP Station Links")
-    
+
     def __str__(self):
         return f"{self.network_connection} - {self.station.wigos_id} - {self.station}"
-    
+
     def clean(self):
         super().clean()
-        
+
         if self.listing_strategy in [FTPListingStrategy.PATTERN_ONLY, FTPListingStrategy.FILTER_BY_DATE]:
             if not self.file_pattern:
                 raise ValidationError({
@@ -767,7 +767,7 @@ class FTPStationLink(StationLink):
                         "File pattern is required for Pattern Only and Filter by Date strategies"
                     )
                 })
-        
+
         if self.listing_strategy == FTPListingStrategy.FILTER_BY_DATE:
             if not self.filename_date_format:
                 raise ValidationError({
@@ -775,7 +775,7 @@ class FTPStationLink(StationLink):
                         "Filename date format is required when using Filter by Date strategy"
                     )
                 })
-        
+
         if self.listing_strategy == FTPListingStrategy.DIRECT_FETCH:
             if not self.direct_fetch_prefix:
                 raise ValidationError({
@@ -795,17 +795,17 @@ class FTPStationLink(StationLink):
                         "Datetime format is required when using Direct Fetch strategy"
                     )
                 })
-    
+
     def get_variable_mappings(self):
         """Returns the variable mappings for this station link."""
         connection_variable_mappings = self.network_connection.variable_mappings.all() or []
         station_variable_mappings = self.variable_mappings.all() or []
-        
+
         resolved = {m.adl_parameter_id: m for m in connection_variable_mappings}
         resolved.update({m.adl_parameter_id: m for m in station_variable_mappings})
-        
+
         return list(resolved.values())
-    
+
     def get_first_collection_date(self):
         """Returns the first collection date for this station link."""
         return self.start_date
@@ -898,18 +898,18 @@ class FTPStationLinkVariableMapping(Orderable):
     adl_parameter = models.ForeignKey(DataParameter, on_delete=models.CASCADE, verbose_name=_("ADL Parameter"))
     file_variable_name = models.CharField(max_length=255, verbose_name=_("File Variable Name"))
     file_variable_unit = models.ForeignKey(Unit, on_delete=models.CASCADE, verbose_name=_("File Variable Unit"))
-    
+
     panels = [
         FieldPanel("adl_parameter"),
         FieldPanel("file_variable_name"),
         FieldPanel("file_variable_unit"),
     ]
-    
+
     @property
     def source_parameter_name(self):
         """Returns the shortcode of the variable."""
         return self.file_variable_name
-    
+
     @property
     def source_parameter_unit(self):
         """Returns the unit of the variable."""
@@ -944,7 +944,7 @@ class FTPStationDataFile(models.Model):
             "or ingestion-window mismatch. Empty for files processed before this was recorded."
         )
     )
-    
+
     class Meta:
         verbose_name = _("Remote Station Data File")
         verbose_name_plural = _("Remote Station Data Files")
@@ -954,7 +954,7 @@ class FTPStationDataFile(models.Model):
                 name="idx_ftpfile_station_file_id",
             ),
         ]
-    
+
     def __str__(self):
         return f"{self.station_link} - {self.file_name}"
 
@@ -965,7 +965,7 @@ class BaseFTPUpload(models.Model):
         ("append", _("Append record to single daily file")),
         ("new_file", _("Create a new file for each record")),
     )
-    
+
     connection_type = models.CharField(
         max_length=10,
         choices=ConnectionType.choices,
@@ -977,11 +977,11 @@ class BaseFTPUpload(models.Model):
                             help_text=_("Leave blank for default (21 for FTP/FTPS, 22 for SFTP)"))
     user = models.CharField(max_length=255, verbose_name=_("Username"))
     password = models.CharField(max_length=255, verbose_name=_("Password"), blank=True)
-    
+
     # FTP specific
     passive = models.BooleanField(default=True, verbose_name=_("Use FTP Passive Mode"))
     secure = models.BooleanField(default=False, verbose_name=_("Secure (FTPS)"))
-    
+
     # SFTP specific
     private_key_file = models.CharField(max_length=500, blank=True, verbose_name=_("Private Key File"))
     host_key_policy = models.CharField(
@@ -992,22 +992,22 @@ class BaseFTPUpload(models.Model):
     )
     look_for_keys = models.BooleanField(default=False, verbose_name=_("Look for SSH Keys"))
     allow_agent = models.BooleanField(default=False, verbose_name=_("Allow SSH Agent"))
-    
+
     directory = models.CharField(max_length=255, verbose_name=_("Remote Directory"),
                                  help_text=_("Directory on the server to upload files to"))
     timezone = TimeZoneField(default='UTC', verbose_name=_("Timezone for output dates"),
                              help_text=_("Timezone to use for file dates. UTC highly recommended"))
-    
+
     write_mode = models.CharField(max_length=20, choices=WRITE_MODES, default="append",
                                   verbose_name=_("Write Mode"))
-    
+
     class Meta:
         abstract = True
-    
+
     def clean(self):
         """Validate connection settings"""
         super().clean()
-        
+
         if self.connection_type == ConnectionType.SFTP:
             if not self.password and not self.private_key_file:
                 raise ValidationError({
@@ -1018,20 +1018,20 @@ class BaseFTPUpload(models.Model):
                 raise ValidationError({
                     'password': _("Password is required for FTP/FTPS connections")
                 })
-    
+
     @property
     def effective_port(self):
         """Get the port to use"""
         if self.port:
             return int(self.port)
-        
+
         defaults = {
             ConnectionType.FTP: 21,
             ConnectionType.FTPS: 21,
             ConnectionType.SFTP: 22,
         }
         return defaults.get(self.connection_type, 21)
-    
+
     @property
     def connection_details(self):
         """Get connection details for the appropriate client"""
@@ -1058,7 +1058,7 @@ class BaseFTPUpload(models.Model):
                 "passive": self.passive,
                 "secure": self.secure and self.connection_type == ConnectionType.FTPS,
             }
-    
+
     def get_client(self):
         """Get appropriate client based on connection type"""
         if self.connection_type == ConnectionType.SFTP:
@@ -1090,11 +1090,11 @@ class FTPUpload(BaseFTPUpload, DispatchChannel):
         ], heading=_("SFTP Settings")),
         FieldPanel("write_mode"),
     ] + DispatchChannel.parameter_panels
-    
+
     class Meta:
         verbose_name = _("Standard FTP/SFTP Upload")
         verbose_name_plural = _("Standard FTP/SFTP Uploads")
-    
+
     def send_station_data(self, station_link, station_data_records):
         return dispatch_to_ftp(self, station_data_records)
 
@@ -1113,7 +1113,7 @@ class SmartMetFTPUpload(BaseFTPUpload, DispatchChannel):
                                           null=True,
                                           verbose_name=_("Stations Metadata CSV File Name"),
                                           help_text=_("Name of the stations metadata CSV file to upload"))
-    
+
     panels = DispatchChannel.base_panels + [
         FieldPanel("connection_type"),
         FieldPanel("timezone"),
@@ -1125,13 +1125,13 @@ class SmartMetFTPUpload(BaseFTPUpload, DispatchChannel):
             FieldPanel("directory"),
             FieldPanel("write_mode"),
         ], heading=_("Basic Configuration")),
-        
+
         MultiFieldPanel([
             FieldPanel("update_stations_metadata_after_station_update"),
             FieldPanel("stations_csv_ftp_path"),
             FieldPanel("stations_file_name"),
         ], heading=_("Stations Metadata CSV Configuration")),
-        
+
         MultiFieldPanel([
             FieldPanel("passive"),
             FieldPanel("secure"),
@@ -1141,58 +1141,58 @@ class SmartMetFTPUpload(BaseFTPUpload, DispatchChannel):
             FieldPanel("host_key_policy"),
         ], heading=_("SFTP Settings")),
     ] + DispatchChannel.parameter_panels
-    
+
     class Meta:
         verbose_name = _("SmartMet FTP/SFTP Upload")
         verbose_name_plural = _("SmartMet FTP/SFTP Uploads")
-    
+
     @property
     def smartmet_params(self):
         SMARTMET_PARAMETER_NAMES = getattr(settings, "SMARTMET_PARAMETER_NAMES", [])
         return SMARTMET_PARAMETER_NAMES
-    
+
     def clean_parameter_mapping(self, parameter_mapping):
         if parameter_mapping.channel_parameter not in self.smartmet_params:
             message = "The provide channel parameter is not in the known list of parameters"
             raise ValidationError(message)
-    
+
     def get_parameter_mapping_values(self):
         return self.smartmet_params
-    
+
     def send_station_data(self, station_link, station_data_records):
         return dispatch_to_ftp(self, station_data_records, create_station_dir=False, include_wigos_id=False,
                                use_single_timestamp=True, include_header=False)
-    
+
     def get_smartmet_metadata_csv(self):
         metadata_csv = get_station_metadata_csv(self)
         return metadata_csv
-    
+
     def upload_stations_metadata(self):
         if not self.update_stations_metadata_after_station_update:
             logger.info(
                 f"[SMARTMET METADATA] Skipping stations metadata upload as it is disabled for channel: {self.name}")
             return
-        
+
         if not self.stations_csv_ftp_path:
             logger.warning(
                 f"[SMARTMET METADATA] No FTP path configured for stations metadata CSV in channel: {self.name}")
             return
-        
+
         csv_file = self.get_smartmet_metadata_csv()
-        
+
         # Use the flexible client
         client = self.get_client()
-        
+
         directory = self.stations_csv_ftp_path
         file_name = self.stations_file_name
         if not file_name:
             file_name = "stations.csv"
         remote_path = f"{directory}/{file_name}"
-        
+
         logger.info(f"[SMARTMET METADATA] Uploading file to '{remote_path}' via {self.connection_type}")
         client.put(csv_file, remote_path)
         client.close()
-    
+
     def after_update_station_links(self):
         self.upload_stations_metadata()
 
@@ -1207,16 +1207,16 @@ def upload_smartmet_metadata_on_save(sender, instance, created, **kwargs):
         if not instance.enabled:
             logger.debug(f"[SMARTMET METADATA] Skipping metadata upload for disabled channel: {instance.name}")
             return
-        
+
         # Check if connection details are complete
         if not all([instance.host, instance.user, instance.directory]):
             logger.warning(f"[SMARTMET METADATA] Incomplete connection configuration for channel: {instance.name}")
             return
-        
+
         logger.info(
             f"[SMARTMET METADATA] Starting metadata upload for channel: {instance.name} via {instance.connection_type}")
         instance.upload_stations_metadata()
         logger.info(f"[SMARTMET METADATA] Successfully uploaded metadata for channel: {instance.name}")
-    
+
     except Exception as e:
         logger.error(f"[SMARTMET METADATA] Failed to upload metadata for channel {instance.name}: {str(e)}")

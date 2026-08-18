@@ -25,12 +25,12 @@ SFTP_CONNECTION_ERRORS = (
 
 class SFTPError(Exception):
     """ Base class for SFTP errors """
-    
+
     def __init__(self, message, status):
         super().__init__(message)
         self.message = message
         self.status = status
-    
+
     def __str__(self):
         return f"{self.message} (HTTP {self.status})"
 
@@ -38,12 +38,12 @@ class SFTPError(Exception):
 class SFTPClient:
     """ SFTP client using paramiko """
     relative_paths = {'.', '..'}
-    
+
     def __init__(self, host, port=22, user=None, password=None, private_key=None,
                  timeout=20, host_key_policy='auto', look_for_keys=False, allow_agent=False, **kwargs):
         """
         Initialize SFTP client
-        
+
         Args:
             host: SSH server hostname
             port: SSH port (default 22)
@@ -55,18 +55,18 @@ class SFTPClient:
         """
         if not paramiko:
             raise ImportError("paramiko library is required for SFTP connections")
-        
+
         self.host = host
         self.port = port
         self.user = user
         self.password = password
         self.ssh = None
         self.sftp = None
-        
+
         try:
             # Create SSH client
             self.ssh = paramiko.SSHClient()
-            
+
             # Set host key policy
             if host_key_policy == 'auto':
                 self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -74,7 +74,7 @@ class SFTPClient:
                 self.ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
             else:  # reject
                 self.ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
-            
+
             # Handle private key
             pkey = None
             if private_key:
@@ -85,11 +85,11 @@ class SFTPClient:
                         try:
                             pkey = key_class.from_private_key_file(private_key)
                             break
-                        except:
+                        except Exception:
                             continue
                 else:
                     pkey = private_key
-            
+
             # Connect via SSH
             self.ssh.connect(
                 hostname=host,
@@ -102,22 +102,22 @@ class SFTPClient:
                 allow_agent=allow_agent,
                 **kwargs
             )
-            
+
             # Open SFTP channel
             self.sftp = self.ssh.open_sftp()
-        
+
         except SFTP_CONNECTION_ERRORS as e:
             message, status = map_sftp_error(e)
             raise SFTPError(message, status)
-    
+
     def get(self, path, local=None):
         """
         Download a file from the remote server
-        
+
         Args:
             path: Remote file path
             local: Local destination (file path, file object, or None for bytes)
-            
+
         Returns:
             None if local is a path or file object, bytes if local is None
         """
@@ -133,40 +133,40 @@ class SFTPClient:
         else:  # path to file, download directly
             self.sftp.get(path, local)
             return None
-    
+
     def put(self, local, remote, contents=None, quiet=False):
         """
         Upload a file to the remote server
-        
+
         Args:
             local: Local file path, file object, or None if using contents
             remote: Remote destination path
             contents: Bytes to upload (if local is None)
             quiet: If True, suppress exceptions
-            
+
         Returns:
             File size on success, 0 on failure
         """
         size = 0
         local_file = None
         original_cwd = None
-        
+
         try:
             # Store original working directory
             original_cwd = self.pwd()
-            
+
             # Handle directory creation and navigation for absolute paths
             if remote.startswith('/'):
                 # Absolute path - handle directory creation
                 remote_dir = os.path.dirname(remote)
                 remote_file = os.path.basename(remote)
-                
+
                 if remote_dir and remote_dir != '/':
                     # Change to root first for absolute paths
                     self.sftp.chdir('/')
                     # Create directory structure if needed
                     self._ensure_remote_dir(remote_dir, force=True, quiet=quiet)
-                
+
                 # Use the full remote path for upload
                 upload_path = remote
             else:
@@ -174,15 +174,15 @@ class SFTPClient:
                 remote_dir = os.path.dirname(remote) if not remote.endswith('/') else remote.rstrip('/')
                 remote_file = os.path.basename(remote) if not remote.endswith('/') else \
                     os.path.basename(local) if isinstance(local, str) else 'uploaded_file'
-                
+
                 if remote.endswith('/'):
                     upload_path = os.path.join(remote, remote_file).replace('\\', '/')
                 else:
                     upload_path = remote
-                
+
                 if remote_dir:
                     self._ensure_remote_dir(remote_dir, force=True, quiet=quiet)
-            
+
             # Prepare local file
             if contents:
                 local_file = BytesIO(contents)
@@ -191,14 +191,14 @@ class SFTPClient:
                 self.sftp.putfo(local, upload_path)
             else:
                 self.sftp.put(local, upload_path)
-            
+
             # Get file size
             try:
                 size = self.sftp.stat(upload_path).st_size
-            except:
+            except Exception:
                 size = 0
-        
-        except Exception as e:
+
+        except Exception:
             if not quiet:
                 raise
         finally:
@@ -208,11 +208,11 @@ class SFTPClient:
             if original_cwd:
                 try:
                     self.sftp.chdir(original_cwd)
-                except:
+                except Exception:
                     pass
-        
+
         return size
-    
+
     def _ensure_remote_dir(self, remote_dir, force=False, quiet=False):
         """
         Ensure remote directory exists, creating it if force=True
@@ -220,17 +220,17 @@ class SFTPClient:
         """
         if not remote_dir or remote_dir == '/':
             return
-        
+
         if remote_dir.startswith('/'):
             # Absolute path
             parts = [p for p in remote_dir.split('/') if p]
             current_path = ''
-            
+
             for part in parts:
                 current_path += '/' + part
                 try:
                     self.sftp.stat(current_path)
-                except:
+                except Exception:
                     if force:
                         try:
                             self.sftp.mkdir(current_path)
@@ -243,11 +243,11 @@ class SFTPClient:
         else:
             # Relative path - use the original descend method
             self.descend(remote_dir, force=force)
-    
+
     def cd(self, remote):
         """
         Change working directory on server
-        
+
         Returns:
             Current directory path on success, False on failure
         """
@@ -256,20 +256,21 @@ class SFTPClient:
             return self.pwd()
         except Exception:
             return False
-    
+
     def pwd(self):
         """Return the current working directory"""
         return self.sftp.getcwd() or '/'
-    
+
     def list(self, remote='.', extra=False, remove_relative_paths=False):
         """
         Return directory listing
-        
+
         Args:
             remote: Remote directory path
-            extra: If True, return detailed file information compatible with split_file_info format
+            extra: If True, return detailed file information compatible with
+                the split_file_info format
             remove_relative_paths: If True, filter out '.' and '..' entries
-            
+
         Returns:
             List of filenames (extra=False) or list of file info dicts (extra=True)
         """
@@ -278,12 +279,12 @@ class SFTPClient:
                 # Get detailed listing in split_file_info compatible format
                 directory_list = []
                 attrs_list = self.sftp.listdir_attr(remote)
-                
+
                 for attr in attrs_list:
                     # Get file mode string
                     mode_str = stat.filemode(attr.st_mode) if attr.st_mode else '-rwxrwxrwx'
                     is_dir = stat.S_ISDIR(attr.st_mode) if attr.st_mode else False
-                    
+
                     # Get datetime info
                     if attr.st_mtime:
                         dt_obj = datetime.fromtimestamp(attr.st_mtime)
@@ -295,7 +296,7 @@ class SFTPClient:
                         date_str = dt_obj.strftime('%b %d')
                         time_str = '00:00'
                         year_str = dt_obj.strftime('%Y')
-                    
+
                     file_info = dotdict({
                         'directory': 'd' if is_dir else '-',
                         'flags': mode_str,
@@ -317,36 +318,36 @@ class SFTPClient:
             else:
                 # Simple listing
                 directory_list = self.sftp.listdir(remote)
-            
+
             # Filter relative paths if requested
             if remove_relative_paths:
                 return list(filter(self.is_not_relative_path, directory_list))
-            
+
             return directory_list
-        
+
         except Exception as e:
             raise SFTPError(f"Failed to list directory {remote}: {str(e)}", 502)
-    
+
     def is_not_relative_path(self, path):
         """Check if path is not a relative path (. or ..)"""
         if isinstance(path, dict):
             return path.get('name') not in self.relative_paths
         else:
             return path not in self.relative_paths
-    
+
     def descend(self, remote, force=False):
         """
         Navigate to directory, creating directories if force=True
-        
+
         Args:
             remote: Remote directory path (can be nested like 'dir1/dir2/dir3')
             force: If True, create directories that don't exist
-            
+
         Returns:
             Current directory path
         """
         remote_dirs = [d for d in remote.split('/') if d]  # Filter empty strings
-        
+
         for directory in remote_dirs:
             try:
                 self.sftp.chdir(directory)
@@ -359,9 +360,9 @@ class SFTPClient:
                         raise SFTPError(f"Failed to create/enter directory {directory}: {str(e)}", 502)
                 else:
                     raise SFTPError(f"Directory {directory} does not exist", 404)
-        
+
         return self.pwd()
-    
+
     def mkdir(self, path, mode=0o755):
         """Create a directory"""
         try:
@@ -369,7 +370,7 @@ class SFTPClient:
             return True
         except Exception as e:
             raise SFTPError(f"Failed to create directory {path}: {str(e)}", 502)
-    
+
     def rmdir(self, path):
         """Remove a directory"""
         try:
@@ -377,7 +378,7 @@ class SFTPClient:
             return True
         except Exception as e:
             raise SFTPError(f"Failed to remove directory {path}: {str(e)}", 502)
-    
+
     def remove(self, path):
         """Remove a file"""
         try:
@@ -385,7 +386,7 @@ class SFTPClient:
             return True
         except Exception as e:
             raise SFTPError(f"Failed to remove file {path}: {str(e)}", 502)
-    
+
     def stat_file(self, path):
         """
         Does ``path`` exist on the server, and how big is it? One ``stat``
@@ -404,33 +405,33 @@ class SFTPClient:
         except SFTP_CONNECTION_ERRORS as e:
             raise SFTPError(f"Failed to stat {path}: {e}", 502)
         return {"exists": True, "size": getattr(attrs, "st_size", None)}
-    
+
     def stat(self, path):
         """Get file/directory statistics"""
         try:
             return self.sftp.stat(path)
         except Exception as e:
             raise SFTPError(f"Failed to stat {path}: {str(e)}", 404)
-    
+
     def exists(self, path):
         """Check if a file or directory exists"""
         try:
             self.sftp.stat(path)
             return True
-        except:
+        except Exception:
             return False
-    
+
     def close(self):
         """Close the SFTP and SSH connections"""
         try:
             if self.sftp:
                 self.sftp.close()
-        except:
+        except Exception:
             pass
         try:
             if self.ssh:
                 self.ssh.close()
-        except:
+        except Exception:
             pass
 
 

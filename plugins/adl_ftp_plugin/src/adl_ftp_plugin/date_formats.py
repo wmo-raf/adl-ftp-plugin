@@ -72,7 +72,7 @@ FILENAME_DATE_FORMAT_DEFINITIONS = [
         "length": 6,
         "strptime": "%m%d%y",
     },
-    
+
     # Underscore separated compact datetime
     {
         "format": "YYYYMMDD_HHMMSS",
@@ -81,7 +81,7 @@ FILENAME_DATE_FORMAT_DEFINITIONS = [
         "length": 15,
         "strptime": "%Y%m%d_%H%M%S",
     },
-    
+
     # Dash separated
     {
         "format": "YYYY-MM-DD",
@@ -132,7 +132,7 @@ FILENAME_DATE_FORMAT_DEFINITIONS = [
         "length": 8,
         "strptime": "%y-%m-%d",
     },
-    
+
     # Underscore separated
     {
         "format": "YYYY_MM_DD",
@@ -176,7 +176,7 @@ FILENAME_DATE_FORMAT_DEFINITIONS = [
         "length": 10,
         "strptime": "%m_%d_%Y",
     },
-    
+
     # Dot separated
     {
         "format": "YYYY.MM.DD",
@@ -199,7 +199,7 @@ FILENAME_DATE_FORMAT_DEFINITIONS = [
         "length": 10,
         "strptime": "%m.%d.%Y",
     },
-    
+
     # ISO 8601 / RFC 3339 variants
     {
         "format": "YYYY-MM-DDTHH",
@@ -222,7 +222,7 @@ FILENAME_DATE_FORMAT_DEFINITIONS = [
         "length": 19,
         "strptime": "%Y-%m-%dT%H:%M:%S",
     },
-    
+
     # Julian day
     {
         "format": "YYYYDDD",
@@ -238,7 +238,7 @@ FILENAME_DATE_FORMAT_DEFINITIONS = [
         "length": 5,
         "strptime": "%y%j",
     },
-    
+
     # Year and month only
     {
         "format": "YYYYMM",
@@ -261,7 +261,7 @@ FILENAME_DATE_FORMAT_DEFINITIONS = [
         "length": 7,
         "strptime": "%Y_%m",
     },
-    
+
     # Text month formats
     {
         "format": "YYYY-MMM-DD",
@@ -291,7 +291,7 @@ FILENAME_DATE_FORMAT_DEFINITIONS = [
         "length": 9,
         "strptime": "%d%b%Y",
     },
-    
+
     # Unix timestamp
     {
         "format": "TIMESTAMP",

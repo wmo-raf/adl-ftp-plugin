@@ -8,17 +8,18 @@ from .ftp.ftp_utils import filter_files_by_date_range
 
 class FTPDecoder(Instance):
     """
-    This abstract class represents a custom ftp data decoder that can be added to the registry.
+    This abstract class represents a custom ftp data decoder that can be added
+    to the registry.
     It must be extended so properties and methods can be added.
     """
-    
+
     type = ""
     compat_type = ""
-    
+
     def __init__(self):
         if not self.type:
             raise ImproperlyConfigured("The type of an instance must be set.")
-    
+
     def pre_process(self, file_path):
         """
         This method is called before the decoding process.
@@ -27,7 +28,7 @@ class FTPDecoder(Instance):
         :type file_path: str
         """
         return file_path
-    
+
     def decode(self, file_path):
         """
         Decodes the given file and returns the result.
@@ -38,7 +39,7 @@ class FTPDecoder(Instance):
         :rtype: list[dict]
         """
         raise NotImplementedError
-    
+
     def get_variables(self):
         """
         Declare the variables this decoder emits, so the admin can pre-populate
@@ -48,7 +49,7 @@ class FTPDecoder(Instance):
 
             {
                 "name": "wind_speed_2m",   # required: key emitted by decode()
-                "unit": "knot",            # required: pint symbol of the value in the file
+                "unit": "knot",            # required: pint symbol of the value
                 "label": "Wind Speed 2m",  # optional: human name; defaults to name
                 "adl_unit": "m/s",         # optional: pint symbol for an auto-created
                                            #   ADL DataParameter; defaults to unit
@@ -61,11 +62,11 @@ class FTPDecoder(Instance):
         :rtype: list[dict]
         """
         return []
-    
+
     def get_matching_files(self, station_link, files, start_date=None, end_date=None):
         """
         Returns a list of files that match the decoder and date range.
-    
+
         :param station_link: The station link that is used to collect the data.
         :type station_link: adl_ftp_plugin.models.FTPStationLink
         :param files: The list of files that should be checked.
@@ -76,12 +77,12 @@ class FTPDecoder(Instance):
         :rtype: list[str]
         """
         from .models import FTPListingStrategy
-        
+
         pattern = station_link.file_pattern
-        
+
         # Filter files by pattern
         matching_files = [file for file in files if fnmatch.fnmatch(file, pattern)]
-        
+
         # If strategy is filter_by_date, filter by date in filename
         if station_link.listing_strategy == FTPListingStrategy.FILTER_BY_DATE and station_link.filename_date_format:
             matching_files = filter_files_by_date_range(
@@ -91,7 +92,7 @@ class FTPDecoder(Instance):
                 end_date,
                 tz=station_link.filename_date_timezone
             )
-        
+
         return matching_files
 
 
@@ -99,7 +100,7 @@ class FTPDecoderRegistry(Registry):
     """
     With the decoder registry it is possible to register new ftp data decoders.
     """
-    
+
     name = "adl_ftp_decoder"
 
 

@@ -13,12 +13,12 @@ logger = logging.getLogger(__name__)
 
 def cleanup_old_ftp_files():
     cutoff = timezone.now() - timedelta(days=7)
-    
+
     old_files = FTPStationDataFile.objects.filter(
         processed_at__isnull=False,
         processed_at__lt=cutoff
     )
-    
+
     for data_file in old_files:
         data_file.file.delete()
         data_file.delete()

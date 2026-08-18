@@ -1,6 +1,3 @@
-import os
-
-
 def setup(settings):
     """
     This function is called after adl has setup its own Django settings file but
@@ -9,5 +6,5 @@ def setup(settings):
 
     settings.INSTALLED_APPS += ["some_custom_plugin_dep"]
     """
-    
+
     settings.SMARTMET_PARAMETER_NAMES = settings.env.list("SMARTMET_PARAMETER_NAMES", default=[])

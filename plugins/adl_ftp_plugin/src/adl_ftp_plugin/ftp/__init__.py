@@ -23,12 +23,12 @@ FTP_CONNECTION_ERRORS = (
 
 class FTPError(Exception):
     """ Base class for FTP errors """
-    
+
     def __init__(self, message, status):
         super().__init__(message)
         self.message = message
         self.status = status
-    
+
     def __str__(self):
         return f"{self.message} ({self.status})"
 
@@ -39,7 +39,7 @@ def _make_tls_conn(host, user, password, timeout, ctx, **kwargs):
     This fixes the [SSL: SHUTDOWN_WHILE_IN_INIT] error that occurs when the
     server requires the data connection to reuse the control channel SSL session.
     """
-    
+
     class _FTP_TLS(FTP_TLS):
         def ntransfercmd(self, cmd, rest=None):
             conn, size = FTP.ntransfercmd(self, cmd, rest)
@@ -50,7 +50,7 @@ def _make_tls_conn(host, user, password, timeout, ctx, **kwargs):
                     session=self.sock.session  # reuse control channel SSL session
                 )
             return conn, size
-    
+
     return _FTP_TLS(host=host, user=user, passwd=password, timeout=timeout, context=ctx, **kwargs)
 
 
@@ -58,13 +58,13 @@ class FTPClient:
     """ FTP client """
     tmp_output = None
     relative_paths = {'.', '..'}
-    
+
     def __init__(self, host, port, user, password, secure=False, passive=True, timeout=20, **kwargs):
         self.host = host
         self.port = port
         self.user = user
         self.password = password
-        
+
         try:
             if secure and FTP_TLS:
                 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -82,14 +82,14 @@ class FTPClient:
                 ftp.connect(host=host, port=port or 21)
                 ftp.login(user=user, passwd=password)
                 self.conn = ftp
-            
+
             if not passive:
                 self.conn.set_pasv(False)
-        
+
         except FTP_CONNECTION_ERRORS as e:
             message, status = map_ftp_error(e)
             raise FTPError(message, status)
-    
+
     def get(self, path, local=None):
         if isinstance(local, IOBase):
             local_file = local
@@ -97,7 +97,7 @@ class FTPClient:
             local_file = BytesIO()
         else:
             local_file = open(local, 'wb')
-        
+
         try:
             self.conn.retrbinary('RETR ' + path, local_file.write)
         except FTP_CONNECTION_ERRORS as e:
@@ -106,14 +106,14 @@ class FTPClient:
         finally:
             if not isinstance(local, IOBase) and local is not None:
                 local_file.close()
-        
+
         if local is None:
             contents = local_file.getvalue()
             local_file.close()
             return contents
-        
+
         return None
-    
+
     def put(self, local, remote, contents=None, quiet=False):
         """ Puts a local file (or contents) on to the FTP server
 
@@ -125,7 +125,7 @@ class FTPClient:
         remote_dir = os.path.dirname(remote)
         remote_file = os.path.basename(local) \
             if remote.endswith('/') else os.path.basename(remote)
-        
+
         if contents:
             # local is ignored if contents is set
             local_file = BytesIO(contents)
@@ -133,15 +133,15 @@ class FTPClient:
             local_file = local
         else:
             local_file = open(local, 'rb')
-        
+
         if remote_dir:
             self.descend(remote_dir, force=True)
-        
+
         size = 0
         try:
             self.conn.storbinary('STOR %s' % remote_file, local_file)
             size = self.conn.size(remote_file)
-        except:
+        except Exception:
             if not quiet:
                 raise
         finally:
@@ -151,7 +151,7 @@ class FTPClient:
                 back = "/".join(['..' for d in range(depth)])
                 self.conn.cwd(back)
         return size
-    
+
     def cd(self, remote):
         """ Change working directory on server """
         try:
@@ -160,7 +160,7 @@ class FTPClient:
             return False
         else:
             return self.pwd()
-    
+
     def stat_file(self, path):
         """
         Does ``path`` exist on the server, and how big is it? One ``SIZE``
@@ -180,11 +180,11 @@ class FTPClient:
             message, status = map_ftp_error(e)
             raise FTPError(message, status)
         return {"exists": True, "size": size}
-    
+
     def pwd(self):
         """ Return the current working directory """
         return self.conn.pwd()
-    
+
     def list(self, remote='.', extra=False, remove_relative_paths=False):
         try:
             if extra:
@@ -196,21 +196,21 @@ class FTPClient:
         except FTP_CONNECTION_ERRORS as e:
             message, status = map_ftp_error(e)
             raise FTPError(message, status)
-        
+
         if remove_relative_paths:
             return list(filter(self.is_not_relative_path, directory_list))
         return directory_list
-    
+
     def _collector(self, line):
         """ Helper for collecting output from dir() """
         self.tmp_output.append(line)
-    
+
     def is_not_relative_path(self, path):
         if isinstance(path, dict):
             return path.get('name') not in self.relative_paths
         else:
             return path not in self.relative_paths
-    
+
     def descend(self, remote, force=False):
         """ Descend, possibly creating directories as needed """
         remote_dirs = remote.split('/')
@@ -222,7 +222,7 @@ class FTPClient:
                     self.conn.mkd(directory)
                     self.conn.cwd(directory)
         return self.conn.pwd()
-    
+
     def close(self):
         """ End the session """
         try:
