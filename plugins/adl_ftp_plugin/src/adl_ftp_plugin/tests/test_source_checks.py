@@ -22,7 +22,9 @@ from adl_ftp_plugin.models import (
     ConnectionType,
     FTPListingStrategy,
     FTPStationLink,
+    FTPUpload,
     NetworkFTP,
+    SmartMetFTPUpload,
 )
 from adl_ftp_plugin.plugins import AdlFtpPlugin
 
@@ -273,6 +275,148 @@ class SourcesCountTests(SimpleTestCase):
             records = list(plugin.get_station_data(link))
         self.assertEqual(records, [])
         self.assertFalse(hasattr(link, "adl_sources_count"))
+
+
+def make_upload(model=FTPUpload, **kwargs):
+    kwargs.setdefault("host", "ftp.example.test")
+    kwargs.setdefault("user", "adl")
+    kwargs.setdefault("password", "secret")
+    kwargs.setdefault("directory", "/upload")
+    kwargs.setdefault("connection_type", ConnectionType.FTP)
+    return model(**kwargs)
+
+
+class DispatchTestConnectionTests(SimpleTestCase):
+    """``test_connection()`` on the dispatch mixin: connect and authenticate,
+    nothing else. The subject is that the destination answers us."""
+
+    def check(self, upload, client=None, error=None):
+        captured = {}
+
+        def fake_get_client(**kwargs):
+            captured.update(kwargs)
+            if error is not None:
+                raise error
+            return client
+
+        with mock.patch.object(type(upload), "get_client", side_effect=fake_get_client):
+            result = upload.test_connection()
+        self.assertIsInstance(result, dict)
+        self.assertEqual(set(result), {"ok", "supported", "message", "latency_ms"})
+        self.assertIsInstance(result["latency_ms"], int)
+        return result, captured
+
+    def test_success_reports_ok_and_closes_the_client(self):
+        upload = make_upload()
+        client = FakeClient()
+        result, _kwargs = self.check(upload, client=client)
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["supported"])
+        self.assertTrue(client.closed)
+
+    def test_success_message_names_host_port_user_and_the_untested_directory(self):
+        upload = make_upload(port="2121")
+        result, _kwargs = self.check(upload, client=FakeClient())
+        self.assertIn("ftp.example.test", result["message"])
+        self.assertIn("2121", result["message"])
+        self.assertIn("adl", result["message"])
+        # §9.1: write access is deliberately not probed, so the message
+        # carries its own limit rather than implying more than it tested.
+        self.assertIn("/upload", result["message"])
+        self.assertIn("not tested", result["message"])
+
+    def test_connect_only_nothing_listed_changed_or_written(self):
+        upload = make_upload()
+        client = FakeClient()
+        self.check(upload, client=client)
+        self.assertEqual(client.cd_paths, [])
+        self.assertEqual(client.listed_paths, [])
+
+    def test_probe_is_bounded(self):
+        upload = make_upload()
+        _result, kwargs = self.check(upload, client=FakeClient())
+        self.assertEqual(kwargs.get("timeout"), 5)
+
+    def test_sftp_probe_bounds_paramikos_own_timeouts_too(self):
+        # SSHClient.connect(timeout=...) bounds only TCP and the handshake;
+        # paramiko's banner and auth timeouts are independent and sum to ~65s.
+        upload = make_upload(connection_type=ConnectionType.SFTP)
+        _result, kwargs = self.check(upload, client=FakeClient())
+        self.assertEqual(kwargs.get("timeout"), 5)
+        self.assertEqual(kwargs.get("banner_timeout"), 5)
+        self.assertEqual(kwargs.get("auth_timeout"), 5)
+        self.assertEqual(kwargs.get("channel_timeout"), 5)
+
+    def test_ftp_probe_sends_no_paramiko_only_arguments(self):
+        upload = make_upload()
+        _result, kwargs = self.check(upload, client=FakeClient())
+        self.assertNotIn("banner_timeout", kwargs)
+
+    def test_ftp_error_reports_not_ok_but_still_supported(self):
+        upload = make_upload()
+        error = FTPError("FTP Authentication failed", 401)
+        result, _kwargs = self.check(upload, error=error)
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["supported"])
+        self.assertIn("Authentication failed", result["message"])
+
+    def test_sftp_error_reports_not_ok(self):
+        upload = make_upload(connection_type=ConnectionType.SFTP)
+        error = SFTPError("SSH Authentication failed", 401)
+        result, _kwargs = self.check(upload, error=error)
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["supported"])
+
+    def test_never_returns_a_source_check_result(self):
+        # §9.4: failed_source_check_result() sits a few dozen lines above in
+        # models.py and looks like the obvious helper; core rejects it.
+        upload = make_upload()
+        error = FTPError("FTP Authentication failed", 401)
+        result, _kwargs = self.check(upload, error=error)
+        self.assertNotIsInstance(result, SourceCheckResult)
+
+    def test_our_own_bugs_propagate_rather_than_being_flattened(self):
+        upload = make_upload()
+        with mock.patch.object(FTPUpload, "get_client", side_effect=TypeError("our bug")):
+            with self.assertRaises(TypeError):
+                upload.test_connection()
+
+    def test_both_channels_report_the_button_as_supported(self):
+        # Both are `class XUpload(BaseFTPUpload, DispatchChannel)`, so the
+        # mixin wins the MRO; reversing the bases would silently restore
+        # core's "not supported for this channel type".
+        for model in (FTPUpload, SmartMetFTPUpload):
+            with self.subTest(model=model.__name__):
+                upload = make_upload(model=model)
+                result, _kwargs = self.check(upload, client=FakeClient())
+                self.assertTrue(result["supported"])
+
+
+class DispatchGetClientTests(SimpleTestCase):
+    """The bound is added through the client factory, and its default
+    preserves dispatch behaviour exactly."""
+
+    def test_default_call_adds_no_timeout_so_dispatch_is_untouched(self):
+        upload = make_upload()
+        with mock.patch("adl_ftp_plugin.models.FTPClient") as client_cls:
+            upload.get_client()
+        _args, kwargs = client_cls.call_args
+        self.assertNotIn("timeout", kwargs)
+        self.assertEqual(kwargs["host"], "ftp.example.test")
+
+    def test_explicit_timeout_is_forwarded(self):
+        upload = make_upload()
+        with mock.patch("adl_ftp_plugin.models.FTPClient") as client_cls:
+            upload.get_client(timeout=5)
+        _args, kwargs = client_cls.call_args
+        self.assertEqual(kwargs["timeout"], 5)
+
+    def test_sftp_extra_kwargs_are_forwarded(self):
+        upload = make_upload(connection_type=ConnectionType.SFTP)
+        with mock.patch("adl_ftp_plugin.models.SFTPClient") as client_cls:
+            upload.get_client(timeout=5, banner_timeout=5)
+        _args, kwargs = client_cls.call_args
+        self.assertEqual(kwargs["banner_timeout"], 5)
 
 
 class OlderCoreImportSafetyTests(SimpleTestCase):
