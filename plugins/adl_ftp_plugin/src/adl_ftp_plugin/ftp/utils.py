@@ -6,7 +6,7 @@ from dateutil import parser
 
 def _get_year(date):
     from dateutil.relativedelta import relativedelta
-    
+
     current_date = datetime.datetime.now()
     parsed_date = parser.parse("%s" % date)
     if current_date > parsed_date:
@@ -28,7 +28,7 @@ def split_file_info(fileinfo):
         Adapted from https://gist.github.com/tobiasoberrauch/2942716
     """
     files = []
-    
+
     unix_format = re.compile(
         r'^([\-dbclps])' +  # Directory flag [1]
         r'((?:[r-][w-][-xsStT]){3})\s+' +  # Permissions [2]
@@ -40,7 +40,7 @@ def split_file_info(fileinfo):
         r'(\d{1,2}:\d{1,2}|\d{4})\s+' +  # Time or year (need to check conditions) [+= 7]
         r'(.+)$'  # File/directory name [8]
     )
-    
+
     # not exactly sure what format this, but seems windows-esque
     # attempting to address issue: https://github.com/codebynumbers/ftpretty/issues/34
     # can get better results with more data.
@@ -50,16 +50,16 @@ def split_file_info(fileinfo):
         r'(\d+)\s+' +  # file size
         r'(.+)$'  # filename
     )
-    
+
     for line in fileinfo:
         if unix_format.match(line):
             parts = unix_format.split(line)
-            
+
             date = parts[7]
             time = parts[8] if ':' in parts[8] else '00:00'
             year = parts[8] if ':' not in parts[8] else _get_year(date)
             dt_obj = parser.parse("%s %s %s" % (date, year, time))
-            
+
             files.append(dotdict({
                 'directory': parts[1],
                 'flags': parts[1],
@@ -74,16 +74,16 @@ def split_file_info(fileinfo):
                 'name': parts[9],
                 'datetime': dt_obj
             }))
-        
+
         elif windows_format.match(line):
             parts = windows_format.split(line)
-            
+
             hour = int(parts[4])
             hour += 12 if parts[6] == 'P' else 0
             hour = 0 if hour == 24 else hour
             year = int(parts[3]) + 2000
             dt_obj = datetime.datetime(year, int(parts[1]), int(parts[2]), hour, int(parts[5]), 0)
-            
+
             files.append(dotdict({
                 'directory': None,
                 'flags': None,
@@ -98,8 +98,8 @@ def split_file_info(fileinfo):
                 'name': parts[8],
                 'datetime': dt_obj
             }))
-    
+
     # order by name
     files.sort(key=lambda x: x.name.lower() if isinstance(x, dict) else x['name'].lower())
-    
+
     return files
