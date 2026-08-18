@@ -11,6 +11,9 @@ try:
 except ImportError:
     FTP_TLS = None
 
+# The port a blank `port` field means, matching NetworkFTP.effective_port.
+DEFAULT_FTP_PORT = 21
+
 FTP_CONNECTION_ERRORS = (
     socket.gaierror, socket.herror,  # DNS
     ConnectionRefusedError, socket.timeout,  # TCP
@@ -44,11 +47,16 @@ class FTPError(Exception):
         return f"{self.message} ({self.status})"
 
 
-def _make_tls_conn(host, user, password, timeout, ctx, **kwargs):
+def _open_tls_session(host, port, user, password, timeout, ctx, **kwargs):
     """
-    Create an FTP_TLS connection with SSL session reuse on the data channel.
+    Open a logged-in FTP_TLS session with SSL session reuse on the data channel.
     This fixes the [SSL: SHUTDOWN_WHILE_IN_INIT] error that occurs when the
     server requires the data connection to reuse the control channel SSL session.
+
+    Connect and login are explicit calls rather than constructor arguments:
+    ``FTP_TLS`` takes no port, so passing ``host`` to the constructor would
+    open the control connection — and perform the login — against port 21
+    before a configured port could be applied (wmo-raf/adl-ftp-plugin#6).
     """
 
     class _FTP_TLS(FTP_TLS):
@@ -62,7 +70,10 @@ def _make_tls_conn(host, user, password, timeout, ctx, **kwargs):
                 )
             return conn, size
 
-    return _FTP_TLS(host=host, user=user, passwd=password, timeout=timeout, context=ctx, **kwargs)
+    conn = _FTP_TLS(timeout=timeout, context=ctx, **kwargs)
+    conn.connect(host=host, port=port or DEFAULT_FTP_PORT)
+    conn.login(user=user, passwd=password)
+    return conn
 
 
 class FTPClient:
@@ -81,16 +92,12 @@ class FTPClient:
                 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
                 ctx.check_hostname = False
                 ctx.verify_mode = ssl.CERT_NONE
-                self.conn = _make_tls_conn(host, user, password, timeout, ctx, **kwargs)
-                if port:
-                    self.conn.port = port
+                self.conn = _open_tls_session(host, port, user, password, timeout, ctx, **kwargs)
                 self.conn.prot_p()
             else:
                 ftp = FTP()
                 ftp.timeout = timeout
-                if port:
-                    ftp.port = port
-                ftp.connect(host=host, port=port or 21)
+                ftp.connect(host=host, port=port or DEFAULT_FTP_PORT)
                 ftp.login(user=user, passwd=password)
                 self.conn = ftp
 
