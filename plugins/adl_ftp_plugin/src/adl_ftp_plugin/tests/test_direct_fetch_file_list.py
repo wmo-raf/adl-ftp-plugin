@@ -525,8 +525,8 @@ class DirectFetchCheckPageViewTests(TestCase):
     def test_a_slow_host_returns_what_was_answered_and_says_it_is_partial(self):
         from adl_ftp_plugin import views
 
-        fake = SlowStatClient(0.05)
-        with mock.patch.object(views, "CHECK_PAGE_WALL_CLOCK_SECONDS", 0.08):
+        fake = SlowStatClient(0.2)
+        with mock.patch.object(views, "CHECK_PAGE_WALL_CLOCK_SECONDS", 0.3):
             response = self._post(fake, **{"from": "2026-08-17T10:00", "to": "2026-08-17T11:00"})
         body = response.json()
         self.assertTrue(body["partial"])
@@ -542,6 +542,14 @@ class DirectFetchCheckPageViewTests(TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.json()["error"], "Unable to reach FTP host")
 
+    def test_a_connect_that_ran_out_of_time_keeps_its_own_status(self):
+        from adl_ftp_plugin.ftp import FTPError
+        with mock.patch.object(NetworkFTP, "get_client",
+                               mock.Mock(side_effect=FTPError("Took too long", 504))):
+            response = self.client.post(self.url, {"from": "2026-08-17T10:00",
+                                                   "to": "2026-08-17T10:20"})
+        self.assertEqual(response.status_code, 504)
+
     def test_a_repeat_sweep_of_the_same_page_is_held_off(self):
         self.assertEqual(self._post(FakeStatClient()).status_code, 200)
         second = self._post(FakeStatClient())
@@ -552,6 +560,25 @@ class DirectFetchCheckPageViewTests(TestCase):
         other = self._post(FakeStatClient(), **{"from": "2026-08-17T00:00",
                                                 "to": "2026-08-18T10:00", "p": "2"})
         self.assertEqual(other.status_code, 200)
+
+    def test_the_page_posts_the_window_it_resolved(self):
+        # The default window ends at "now"; posting the raw (empty) query back
+        # would let it slide between render and press
+        page = self.client.get(self.list_url)
+        resolved_start = dj_timezone.localtime(
+            page.context["start_date"], self.link.timezone
+        ).isoformat()
+        self.assertContains(page, 'data-from="%s"' % resolved_start)
+
+    def test_the_posted_window_wins_over_a_moved_default_window(self):
+        moved = (datetime(2027, 1, 1, tzinfo=UTC), datetime(2027, 1, 1, 0, 10, tzinfo=UTC))
+        with mock.patch.object(AdlFtpPlugin, "get_dates_for_station", return_value=moved):
+            body = self._post(FakeStatClient()).json()
+        self.assertEqual([r["path"] for r in body["results"]], [
+            "/data/station1/STATION1_202608171000.txt",
+            "/data/station1/STATION1_202608171010.txt",
+            "/data/station1/STATION1_202608171020.txt",
+        ])
 
     def test_an_unreadable_window_is_refused_before_any_connection(self):
         response = self._post(FakeStatClient(), **{"from": "not-a-date"})

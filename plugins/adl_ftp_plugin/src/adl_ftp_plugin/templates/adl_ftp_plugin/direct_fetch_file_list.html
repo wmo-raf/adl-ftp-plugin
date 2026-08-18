@@ -71,6 +71,10 @@
         color: var(--w-color-text-meta);
     }
 
+    .dff-page-actions .dff-count {
+        margin: 0;
+    }
+
     .dff-remote {
         white-space: nowrap;
     }
@@ -220,7 +224,7 @@
 
 {% if rows %}
 <div class="dff-page-actions">
-    <p class="dff-count" style="margin: 0;">
+    <p class="dff-count">
         {% blocktrans trimmed with first=page_obj.start_index last=page_obj.end_index total=total_files %}
         Showing {{ first }}–{{ last }} of {{ total }}
         {% endblocktrans %}
@@ -294,8 +298,8 @@
 {% endif %}
 {% if can_check_remote %}
 <form class="dff-check-form" id="dff-check-form" data-url="{{ check_url }}"
-      data-page-url="{{ check_page_url }}" data-from="{{ from_value }}" data-to="{{ to_value }}"
-      data-page="{{ page_number }}">{% csrf_token %}</form>
+      data-page-url="{{ check_page_url }}" data-from="{{ start_date|date:'c' }}"
+      data-to="{{ end_date|date:'c' }}" data-page="{{ page_number }}">{% csrf_token %}</form>
 {% endif %}
 {% elif not errors %}
 <div class="help-block help-info">

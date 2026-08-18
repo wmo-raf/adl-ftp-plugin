@@ -400,11 +400,11 @@ def _resolve_direct_fetch_window(plugin, station_link, from_raw, to_raw):
 
 
 def _direct_fetch_page(plugin, station_link, start_date, end_date, page_number):
-    """The generated paths for one window, paginated the one way the list
-    page paginates them. Returns ``(file_paths, paginator, page)``."""
+    """One page of the generated paths for a window, paginated the one way the
+    list page paginates them — the whole list stays reachable through the
+    returned page's ``paginator``."""
     file_paths = plugin.get_station_file_paths(station_link, start_date, end_date)
-    paginator = WagtailPaginator(file_paths, DIRECT_FETCH_FILES_PER_PAGE)
-    return file_paths, paginator, paginator.get_page(page_number)
+    return WagtailPaginator(file_paths, DIRECT_FETCH_FILES_PER_PAGE).get_page(page_number)
 
 
 def _direct_fetch_start_source(plugin, station_link):
@@ -464,13 +464,13 @@ def direct_fetch_file_list(request, station_link_id):
         plugin, station_link, request.GET.get("from"), request.GET.get("to")
     )
 
-    file_paths = []
-    paginator = WagtailPaginator(file_paths, DIRECT_FETCH_FILES_PER_PAGE)
-    page = paginator.get_page(request.GET.get("p"))
-    if not errors:
-        file_paths, paginator, page = _direct_fetch_page(
+    if errors:
+        page = WagtailPaginator([], DIRECT_FETCH_FILES_PER_PAGE).get_page(1)
+    else:
+        page = _direct_fetch_page(
             plugin, station_link, start_date, end_date, request.GET.get("p")
         )
+    file_paths = page.paginator.object_list
 
     # Local status only for the visible page: one query, keyed by file name
     # (the same key _process_file() uses to decide whether to download)
@@ -505,10 +505,10 @@ def direct_fetch_file_list(request, station_link_id):
         "start_source": _direct_fetch_start_source(plugin, station_link),
         "from_value": request.GET.get("from", ""),
         "to_value": request.GET.get("to", ""),
-        "total_files": paginator.count,
+        "total_files": page.paginator.count,
         "total_directories": len({os.path.dirname(p) for p in file_paths}),
         "page_obj": page,
-        "elided_page_range": paginator.get_elided_page_range(page.number),
+        "elided_page_range": page.paginator.get_elided_page_range(page.number),
         "rows": rows,
         "page_number": page.number,
         "filename_tz": str(filename_tz),
@@ -540,6 +540,23 @@ def _is_own_direct_fetch_path(station_link, path):
     ) is not None
 
 
+def _direct_fetch_link_for_probe(request, station_link_id):
+    """
+    The station link both remote-check endpoints probe, or the refusal that
+    stands in its place: I/O against the source takes the same permission as
+    the station source check, and only a ``DIRECT_FETCH`` link has generated
+    paths to ask about. Returns ``(station_link, error_response)``.
+    """
+    station_link = get_object_or_404(FTPStationLink, pk=station_link_id)
+    if not _user_can_manage_connection(request.user, station_link.network_connection):
+        raise PermissionDenied
+    if station_link.listing_strategy != FTPListingStrategy.DIRECT_FETCH:
+        return station_link, JsonResponse(
+            {"error": _("This station link does not use Direct Fetch.")}, status=400
+        )
+    return station_link, None
+
+
 @require_POST
 def direct_fetch_file_check(request, station_link_id):
     """
@@ -549,13 +566,9 @@ def direct_fetch_file_check(request, station_link_id):
     server. Answers JSON: ``{"exists": bool, "size": int|null}`` or
     ``{"error": message}`` with a matching status.
     """
-    station_link = get_object_or_404(FTPStationLink, pk=station_link_id)
-    if not _user_can_manage_connection(request.user, station_link.network_connection):
-        raise PermissionDenied
-    if station_link.listing_strategy != FTPListingStrategy.DIRECT_FETCH:
-        return JsonResponse(
-            {"error": _("This station link does not use Direct Fetch.")}, status=400
-        )
+    station_link, refusal = _direct_fetch_link_for_probe(request, station_link_id)
+    if refusal:
+        return refusal
 
     path = (request.POST.get("path") or "").strip()
     if not _is_own_direct_fetch_path(station_link, path):
@@ -580,6 +593,20 @@ def direct_fetch_file_check(request, station_link_id):
 # order of magnitude, and the same promise: the request returns on time and
 # says it is `partial`, rather than holding a web worker on a slow host.
 CHECK_PAGE_WALL_CLOCK_SECONDS = 4 * PROBE_WALL_CLOCK_SECONDS
+
+# What a spent budget still allows the closing handshake, so that hanging up
+# on a healthy host is not reported as a failure to close
+CLOSE_FLOOR_SECONDS = 2
+
+
+def _gateway_status(error):
+    """The HTTP status to answer a client error with. The clients set
+    ``status`` to say what kind of failure it was — a connect that ran out of
+    time is a 504, not a 502 — and only a gateway-class code is trusted from
+    there; anything else (a 403 from the source, say) is this endpoint's own
+    upstream failure and is reported as 502."""
+    status = getattr(error, "status", None)
+    return status if status in (502, 503, 504) else 502
 
 
 def _check_page_cooldown_key(station_link, start_date, end_date, page_number):
@@ -638,9 +665,13 @@ def _sweep_paths(connection, paths, timeout_seconds):
                     "path": path, "exists": result["exists"], "size": result["size"],
                 })
         finally:
+            # Closing is bounded too: a half-dead host can hang a close just
+            # as it can hang a stat, and the bound is what keeps a web worker
+            # from being wedged either way. A little room is left for it even
+            # when the sweep's own budget is spent.
             try:
-                client.close()
-            except Exception:  # noqa: BLE001 — a sweep must not fail on cleanup
+                bounded_call(client.close, max(deadline - time.monotonic(), CLOSE_FLOOR_SECONDS))
+            except Exception:  # noqa: BLE001 — cleanup, including a timeout, never fails a sweep
                 logger.debug("Failed to close the client after a direct-fetch page sweep",
                              exc_info=True)
 
@@ -653,22 +684,24 @@ def direct_fetch_file_check_page(request, station_link_id):
     Which of the files on one page of the direct-fetch list are on the server
     right now? Opens one connection, stats every path on that page, closes.
 
-    The paths are recomputed here from the same ``from``/``to``/``p`` the page
-    was rendered with — the browser posts the window, never the list — so the
+    The paths are recomputed here from the window the page posts back — the
+    browser sends bounds and a page number, never a list of paths — so the
     endpoint can only ever probe paths this station link would itself
     generate, without re-checking each one against the path guard.
+
+    The page posts the window it *resolved*, not the raw ``from``/``to`` it was
+    asked for: the default window ends at "now" and starts at the latest saved
+    observation, so re-deriving it here would slide the whole list if an
+    ingestion run landed between the page rendering and the button press, and
+    the sweep would answer about files the operator is not looking at.
 
     Answers ``{"results": [{"path", "exists", "size"} | {"path", "error"}],
     "partial": bool}``; ``partial`` means the wall clock expired and the rows
     after the last result were not asked about.
     """
-    station_link = get_object_or_404(FTPStationLink, pk=station_link_id)
-    if not _user_can_manage_connection(request.user, station_link.network_connection):
-        raise PermissionDenied
-    if station_link.listing_strategy != FTPListingStrategy.DIRECT_FETCH:
-        return JsonResponse(
-            {"error": _("This station link does not use Direct Fetch.")}, status=400
-        )
+    station_link, refusal = _direct_fetch_link_for_probe(request, station_link_id)
+    if refusal:
+        return refusal
 
     plugin = station_link.network_connection.get_plugin()
     start_date, end_date, _overridden, errors = _resolve_direct_fetch_window(
@@ -677,7 +710,7 @@ def direct_fetch_file_check_page(request, station_link_id):
     if errors:
         return JsonResponse({"error": " ".join(str(e) for e in errors)}, status=400)
 
-    _paths, _paginator, page = _direct_fetch_page(
+    page = _direct_fetch_page(
         plugin, station_link, start_date, end_date, request.POST.get("p")
     )
     paths = list(page.object_list)
@@ -707,6 +740,6 @@ def direct_fetch_file_check_page(request, station_link_id):
             station_link.network_connection, paths, CHECK_PAGE_WALL_CLOCK_SECONDS
         )
     except (FTPError, SFTPError) as e:
-        return JsonResponse({"error": str(e.message)}, status=502)
+        return JsonResponse({"error": str(e.message)}, status=_gateway_status(e))
 
     return JsonResponse({"results": results, "partial": partial})
