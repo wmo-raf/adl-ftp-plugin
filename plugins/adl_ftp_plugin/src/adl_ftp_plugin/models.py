@@ -10,6 +10,7 @@ from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.urls import reverse
+from django.utils import timezone as dj_timezone
 from django.utils.translation import gettext_lazy as _
 from modelcluster.fields import ParentalKey
 from timezone_field import TimeZoneField
@@ -21,8 +22,7 @@ from adl_ftp_plugin.ftp import FTPClient, FTPError
 from adl_ftp_plugin.ftp.sftp import SFTPClient, SFTPError
 from adl_ftp_plugin.utils import (
     get_ftp_decoder_choices,
-    get_date_paths,
-    get_dates_to_now,
+    get_date_path,
     normalize_path,
 )
 from adl_ftp_plugin.validators import validate_start_date
@@ -856,20 +856,33 @@ class FTPStationLink(StationLink):
             }
         ]
 
+    def date_dir_for(self, moment):
+        """
+        The remote directory a file timestamped ``moment`` belongs in — the
+        date period appended to ``ftp_path`` when the tree is structured by
+        date, and the bare path when it is not.
+
+        The tree is named in the station timezone, so the instant is converted
+        before its fields are read. Callers that also format the instant into a
+        filename may well do so in a different timezone
+        (``direct_fetch_datetime_timezone``); reading both off the one instant
+        is what keeps a file near a local midnight in the right day.
+        """
+        if not (self.dir_structured_by_date and self.date_granularity):
+            return normalize_path(self.ftp_path)
+
+        return normalize_path(get_date_path(
+            self.ftp_path,
+            dj_timezone.localtime(moment, self.timezone),
+            self.date_granularity,
+            self.month_dir_format,
+        ))
+
     def resolve_source_path(self):
         """The remote directory this station's files are expected in right
         now — with the current date period appended when the directory tree
         is structured by date."""
-        if self.dir_structured_by_date and self.date_granularity:
-            dates = get_dates_to_now(
-                date_granularity=self.date_granularity,
-                timezone=self.timezone,
-            )
-            paths = get_date_paths(
-                self.ftp_path, dates, self.date_granularity, self.month_dir_format
-            )
-            return normalize_path(paths[-1])
-        return normalize_path(self.ftp_path)
+        return self.date_dir_for(dj_timezone.now())
 
     def source_file_pattern(self):
         """The glob this station's files are matched against, across all

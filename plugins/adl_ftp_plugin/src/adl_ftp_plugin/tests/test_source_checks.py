@@ -378,8 +378,9 @@ class DirectFetchSourcesCountTests(SimpleTestCase):
 
         with mock.patch.object(NetworkFTP, "get_client", return_value=FakeClient()), \
                 mock.patch.object(AdlFtpPlugin, "_get_configured_decoder", return_value=mock.Mock()), \
-                mock.patch.object(AdlFtpPlugin, "_generate_direct_fetch_filenames",
-                                  return_value=[f"STATION1_{i}.txt" for i in range(len(remaining))]), \
+                mock.patch.object(AdlFtpPlugin, "_generate_direct_fetch_files",
+                                  return_value=[(dj_timezone.now(), f"STATION1_{i}.txt")
+                                                for i in range(len(remaining))]), \
                 mock.patch.object(AdlFtpPlugin, "_process_file", side_effect=process_file):
             return list(plugin.get_station_data(link, None, None))
 
