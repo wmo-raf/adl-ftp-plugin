@@ -95,16 +95,25 @@ class AdlFtpPlugin(Plugin):
             net_ftp_name = network_conn_ftp.network.name
             station_name = station_link.station.name
 
-            # Duck-typed sources-count handover: core stores this on the
-            # run's activity log so "looked, found nothing" (0) stays
-            # distinguishable from "never looked" (None). Set only once
-            # listing actually starts — a run that bails before this point
-            # must not report 0.
-            station_link.adl_sources_count = 0
+            # Duck-typed sources-count handover: core stores this on the run's
+            # activity log so "looked, found nothing" (0) stays distinguishable
+            # from "never looked" (None). The lazy initialise-on-first-answer
+            # below is the fleet-wide idiom: every failure path leaves the
+            # attribute None, and core's evidence rule abstains on NULL.
+            def commit_sources_count(count):
+                if getattr(station_link, "adl_sources_count", None) is None:
+                    station_link.adl_sources_count = 0
+                station_link.adl_sources_count += count
+
+            direct_fetch = station_link.listing_strategy == FTPListingStrategy.DIRECT_FETCH
 
             # Process each path — yield records as we go
-            for file_path in self._get_file_paths(station_link, ftp_client, decoder, start_date, end_date):
-                station_link.adl_sources_count += 1
+            file_paths = self._get_file_paths(
+                station_link, ftp_client, decoder, start_date, end_date,
+                on_listing=None if direct_fetch else commit_sources_count,
+            )
+
+            for file_path in file_paths:
                 current_path = os.path.dirname(file_path)
                 file_name = os.path.basename(file_path)
 
@@ -113,7 +122,17 @@ class AdlFtpPlugin(Plugin):
                     f"station '{station_name}' from FTP path '{current_path}'"
                 )
 
-                yield from self._process_file(station_link, current_path, file_name, decoder, ftp_client)
+                in_hand = yield from self._process_file(
+                    station_link, current_path, file_name, decoder, ftp_client
+                )
+
+                if direct_fetch:
+                    # No listing happened here: the filenames were constructed
+                    # from the clock, so they are our guess and not the
+                    # source's offer. What the source did answer is whether
+                    # each file was there — count that instead, and count it
+                    # whether or not the file went on to decode.
+                    commit_sources_count(1 if in_hand else 0)
 
         except Exception as e:
             logger.error(f"Error fetching FTP data: {type(e).__name__}: {e}")
@@ -129,10 +148,17 @@ class AdlFtpPlugin(Plugin):
             decoder,
             start_date: Optional[datetime] = None,
             end_date: Optional[datetime] = None,
+            on_listing=None,
     ) -> Iterator[str]:
         """
         Yields remote file paths to process based on the listing strategy.
         Does not download or decode anything.
+
+        ``on_listing`` is called with the number of files each *successful*
+        listing matched, including zero — it is how the source-items count
+        leaves this method by value rather than being written here, so the
+        duck-typed attribute has one assignment site in
+        :meth:`get_station_data`. A listing that raises never calls it.
         """
         logger = self.get_logger()
         strategy = station_link.listing_strategy
@@ -181,6 +207,12 @@ class AdlFtpPlugin(Plugin):
                     matching_files = decoder.get_matching_files(
                         station_link, files_list, None, None
                     )
+
+                # The listing is in hand and parsed: this is the source's
+                # answer for this directory, and an empty one is still an
+                # answer.
+                if on_listing is not None:
+                    on_listing(len(matching_files))
 
                 if not matching_files:
                     logger.debug(
@@ -281,6 +313,13 @@ class AdlFtpPlugin(Plugin):
 
         A file whose download or decode fails is left unstamped, so it shows as
         "Downloaded, not processed" (or not downloaded) and is retried next run.
+
+        Returns whether the file ended up **in hand** — downloaded now, or
+        already held. DIRECT_FETCH counts source items off this return, since
+        no listing ever told it what the source holds. A file in hand that
+        then fails to decode still counts: source items are counted before
+        conversion, so our decode bug must not read as the source offering
+        nothing.
         """
         logger = self.get_logger()
 
@@ -325,7 +364,7 @@ class AdlFtpPlugin(Plugin):
                         logger.debug(f"File {file_name} not found on server (expected for direct fetch), skipping.")
                     else:
                         logger.error(f"Error downloading file {file_name}: {e}")
-                    return
+                    return False
 
                 finally:
                     try:
@@ -336,7 +375,7 @@ class AdlFtpPlugin(Plugin):
             logger.debug(f"File {file_name} already downloaded, skipping download")
 
         if not db_data_file or not db_data_file.file:
-            return
+            return False
 
         # Decode (always, whether freshly downloaded or existing)
         try:
@@ -344,7 +383,7 @@ class AdlFtpPlugin(Plugin):
             file_records = data.get("values", [])
         except Exception as e:
             logger.error(f"Error decoding file {file_name}: {e}")
-            return
+            return True
 
         logger.debug(f"Decoded {len(file_records)} records from {file_name}")
 
@@ -373,6 +412,8 @@ class AdlFtpPlugin(Plugin):
                 f"File {file_name} decoded {len(file_records)} record(s) but none of its "
                 f"values were saved — check the variable mappings and the ingestion window"
             )
+
+        return True
 
     def get_station_file_paths(self, station_link, start_date=None, end_date=None) -> list:
         """
