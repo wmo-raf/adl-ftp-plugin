@@ -1,5 +1,6 @@
 import fnmatch
 import logging
+import time
 
 from adl.core.models import DataParameter, Unit
 from adl.core.models import NetworkConnection, StationLink, DispatchChannel
@@ -41,6 +42,11 @@ logger = logging.getLogger(__name__)
 # purpose: it collapses DNS, refused and TLS faults into one code, and
 # core's own DNS/TCP probe steps already name those faults — declining a
 # category beats guessing one.
+# Bound for every on-demand probe. Core allows 15 seconds for the whole
+# press, so whoever times out first owns the message: at 5 seconds ours
+# fires inside the budget and the operator gets a specific sentence.
+PROBE_TIMEOUT_SECONDS = 5
+
 SOURCE_CHECK_ERROR_CATEGORIES = {
     401: "AUTH_FAILED",
     403: "PERMISSION_DENIED",
@@ -1059,12 +1065,89 @@ class BaseFTPUpload(models.Model):
                 "secure": self.secure and self.connection_type == ConnectionType.FTPS,
             }
 
-    def get_client(self):
-        """Get appropriate client based on connection type"""
+    def get_client(self, timeout=None, **client_kwargs):
+        """Get appropriate client based on connection type.
+
+        ``timeout`` defaults to None, which leaves each client on its own
+        signature default — dispatch calls this with no arguments, so its
+        behaviour is untouched. Only the on-demand probe passes a bound, and
+        it is deliberately not a model field: an operator who raised it to
+        300 for a slow partner would silently re-break the probe.
+        """
+        details = dict(self.connection_details)
+        if timeout is not None:
+            details["timeout"] = timeout
+        details.update(client_kwargs)
+
         if self.connection_type == ConnectionType.SFTP:
-            return SFTPClient(**self.connection_details)
+            return SFTPClient(**details)
         else:
-            return FTPClient(**self.connection_details)
+            return FTPClient(**details)
+
+    def _probe_client_kwargs(self):
+        """Bounds for the on-demand probe, which shares a 15-second wall
+        clock with everything else core runs on the press."""
+        kwargs = {"timeout": PROBE_TIMEOUT_SECONDS}
+        if self.connection_type == ConnectionType.SFTP:
+            # SSHClient.connect(timeout=...) bounds only TCP and the
+            # handshake. paramiko's Transport sets banner_timeout=15 and
+            # auth_timeout=30 independently, so the unbounded worst case is
+            # ~65 seconds — four times the whole budget.
+            kwargs.update(
+                banner_timeout=PROBE_TIMEOUT_SECONDS,
+                auth_timeout=PROBE_TIMEOUT_SECONDS,
+                channel_timeout=PROBE_TIMEOUT_SECONDS,
+            )
+        return kwargs
+
+    def test_connection(self):
+        """Probe whether the destination answers us: connect, authenticate,
+        close. Nothing is listed, fetched or written.
+
+        Returns the plain dict ``DispatchChannel.test_connection`` documents —
+        never a SourceCheckResult, which core rejects here. The two shapes
+        have two readers: this one becomes a flash message on the admin
+        button and is discarded, while the ingestion diagnostic reads
+        ``direction="pull"`` rows only.
+
+        Write access is deliberately not probed. ``put()`` descends with
+        ``force=True`` and creates missing directories, so a directory that
+        is absent now is not a dispatch failure — and a write-and-delete
+        probe would leave side effects on a third party's server.
+        """
+        start = time.monotonic()
+
+        def latency_ms():
+            return int((time.monotonic() - start) * 1000)
+
+        try:
+            client = self.get_client(**self._probe_client_kwargs())
+            client.close()
+        except (FTPError, SFTPError) as e:
+            # Only the clients' own error types: core's container is the
+            # designated handler for everything else and logs strictly more
+            # than we would.
+            return {
+                "ok": False,
+                "supported": True,
+                "message": str(e),
+                "latency_ms": latency_ms(),
+            }
+
+        return {
+            "ok": True,
+            "supported": True,
+            "message": _(
+                "Connected and authenticated to %(host)s:%(port)s as %(user)s. "
+                "Write access to %(directory)s was not tested."
+            ) % {
+                "host": self.host,
+                "port": self.effective_port,
+                "user": self.user,
+                "directory": self.directory,
+            },
+            "latency_ms": latency_ms(),
+        }
 
 
 class FTPUpload(BaseFTPUpload, DispatchChannel):
