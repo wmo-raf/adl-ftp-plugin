@@ -1,8 +1,16 @@
 import logging
 import os
 import tempfile
+import time
 from datetime import datetime
 
+from adl.core.probes import (
+    PROBE_WALL_CLOCK_SECONDS,
+    ProbeTimeout,
+    bounded_executor,
+    claim_probe_cooldown,
+    read_probe_claim,
+)
 from adl.core.utils import get_object_or_none, get_url_for_station_link
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import JsonResponse
@@ -364,6 +372,41 @@ def _parse_window_bound(raw, tz):
     return value, None
 
 
+def _resolve_direct_fetch_window(plugin, station_link, from_raw, to_raw):
+    """
+    Resolve the window the list page (and the sweep behind it) works over:
+    the real next-run window, with ``from``/``to`` overriding either bound.
+
+    Returns ``(start_date, end_date, overridden, errors)``. Shared by the
+    list page and the page sweep so the sweep probes exactly the paths the
+    operator is looking at, rather than a list posted back by the browser.
+    """
+    tz = station_link.timezone
+    default_start, default_end = plugin.get_dates_for_station(station_link)
+
+    errors = []
+    start_date, err = _parse_window_bound(from_raw, tz)
+    if err:
+        errors.append(err)
+    end_date, err = _parse_window_bound(to_raw, tz)
+    if err:
+        errors.append(err)
+    overridden = bool(start_date or end_date)
+    start_date = start_date or default_start
+    end_date = end_date or default_end
+    if start_date > end_date:
+        errors.append(_("The window start is after its end; nothing to list."))
+    return start_date, end_date, overridden, errors
+
+
+def _direct_fetch_page(plugin, station_link, start_date, end_date, page_number):
+    """The generated paths for one window, paginated the one way the list
+    page paginates them. Returns ``(file_paths, paginator, page)``."""
+    file_paths = plugin.get_station_file_paths(station_link, start_date, end_date)
+    paginator = WagtailPaginator(file_paths, DIRECT_FETCH_FILES_PER_PAGE)
+    return file_paths, paginator, paginator.get_page(page_number)
+
+
 def _direct_fetch_start_source(plugin, station_link):
     """Which rule produced the default window start — mirrors the priority in
     ``Plugin.get_dates_for_station()`` so the page can name it."""
@@ -409,6 +452,7 @@ def direct_fetch_file_list(request, station_link_id):
             request.user, station_link.network_connection
         ),
         "check_url": reverse("ftp_direct_fetch_file_check", args=[station_link.pk]),
+        "check_page_url": reverse("ftp_direct_fetch_file_check_page", args=[station_link.pk]),
     }
     if not context["is_direct_fetch"]:
         context["strategy_label"] = station_link.get_listing_strategy_display()
@@ -416,27 +460,17 @@ def direct_fetch_file_list(request, station_link_id):
 
     plugin = station_link.network_connection.get_plugin()
     tz = station_link.timezone
-    default_start, default_end = plugin.get_dates_for_station(station_link)
-
-    errors = []
-    start_date, err = _parse_window_bound(request.GET.get("from"), tz)
-    if err:
-        errors.append(err)
-    end_date, err = _parse_window_bound(request.GET.get("to"), tz)
-    if err:
-        errors.append(err)
-    overridden = bool(start_date or end_date)
-    start_date = start_date or default_start
-    end_date = end_date or default_end
-    if start_date > end_date:
-        errors.append(_("The window start is after its end; nothing to list."))
+    start_date, end_date, overridden, errors = _resolve_direct_fetch_window(
+        plugin, station_link, request.GET.get("from"), request.GET.get("to")
+    )
 
     file_paths = []
-    if not errors:
-        file_paths = plugin.get_station_file_paths(station_link, start_date, end_date)
-
     paginator = WagtailPaginator(file_paths, DIRECT_FETCH_FILES_PER_PAGE)
     page = paginator.get_page(request.GET.get("p"))
+    if not errors:
+        file_paths, paginator, page = _direct_fetch_page(
+            plugin, station_link, start_date, end_date, request.GET.get("p")
+        )
 
     # Local status only for the visible page: one query, keyed by file name
     # (the same key _process_file() uses to decide whether to download)
@@ -476,6 +510,7 @@ def direct_fetch_file_list(request, station_link_id):
         "page_obj": page,
         "elided_page_range": paginator.get_elided_page_range(page.number),
         "rows": rows,
+        "page_number": page.number,
         "filename_tz": str(filename_tz),
     })
     return render(request, "adl_ftp_plugin/direct_fetch_file_list.html", context)
@@ -538,3 +573,140 @@ def direct_fetch_file_check(request, station_link_id):
         if client:
             client.close()
     return JsonResponse({"path": path, "exists": result["exists"], "size": result["size"]})
+
+
+# The wall clock for one page sweep. A page is 200 stats over one already-open
+# connection, so it is given more room than a single probe — but the same
+# order of magnitude, and the same promise: the request returns on time and
+# says it is `partial`, rather than holding a web worker on a slow host.
+CHECK_PAGE_WALL_CLOCK_SECONDS = 4 * PROBE_WALL_CLOCK_SECONDS
+
+
+def _check_page_cooldown_key(station_link, start_date, end_date, page_number):
+    """One claim per (station link, window, page). Narrower than the probe
+    buttons' per-target key on purpose: sweeping page 2 after page 1 is the
+    normal way to read a window, and must not be held off — only re-pressing
+    the *same* page is."""
+    return "ftp-direct-fetch-check-page:%s:%s:%s:%s" % (
+        station_link.pk, start_date.isoformat(), end_date.isoformat(), page_number,
+    )
+
+
+def _sweep_paths(connection, paths, timeout_seconds):
+    """
+    Stat every path in ``paths`` over **one** connection, under one wall
+    clock shared by the connect and every stat.
+
+    Returns ``(results, partial)``. A path that fails on its own — a
+    permission error, a server hiccup — is reported as ``{"error": …}`` and
+    the sweep carries on; the caller sees a per-row answer either way. When
+    the budget expires the sweep stops where it is and ``partial`` is True,
+    so the operator gets the rows that were answered instead of a timeout.
+
+    Connecting is the caller's failure to report: a host that cannot be
+    dialled is one error about the sweep, not 200 identical row errors, so
+    the client error is left to propagate.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    results = []
+    partial = False
+    client = None
+
+    # One worker: the stats run in sequence down one connection anyway, and
+    # a stuck stat must not be joined — `bounded_executor` abandons it.
+    with bounded_executor(1) as bounded_call:
+        try:
+            client = bounded_call(connection.get_client, deadline - time.monotonic())
+        except ProbeTimeout:
+            raise FTPError(_("Connecting to the server took too long."), 504)
+
+        try:
+            for path in paths:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    partial = True
+                    break
+                try:
+                    result = bounded_call(lambda p=path: client.stat_file(p), remaining)
+                except ProbeTimeout:
+                    partial = True
+                    break
+                except (FTPError, SFTPError) as e:
+                    results.append({"path": path, "error": str(e.message)})
+                    continue
+                results.append({
+                    "path": path, "exists": result["exists"], "size": result["size"],
+                })
+        finally:
+            try:
+                client.close()
+            except Exception:  # noqa: BLE001 — a sweep must not fail on cleanup
+                logger.debug("Failed to close the client after a direct-fetch page sweep",
+                             exc_info=True)
+
+    return results, partial
+
+
+@require_POST
+def direct_fetch_file_check_page(request, station_link_id):
+    """
+    Which of the files on one page of the direct-fetch list are on the server
+    right now? Opens one connection, stats every path on that page, closes.
+
+    The paths are recomputed here from the same ``from``/``to``/``p`` the page
+    was rendered with — the browser posts the window, never the list — so the
+    endpoint can only ever probe paths this station link would itself
+    generate, without re-checking each one against the path guard.
+
+    Answers ``{"results": [{"path", "exists", "size"} | {"path", "error"}],
+    "partial": bool}``; ``partial`` means the wall clock expired and the rows
+    after the last result were not asked about.
+    """
+    station_link = get_object_or_404(FTPStationLink, pk=station_link_id)
+    if not _user_can_manage_connection(request.user, station_link.network_connection):
+        raise PermissionDenied
+    if station_link.listing_strategy != FTPListingStrategy.DIRECT_FETCH:
+        return JsonResponse(
+            {"error": _("This station link does not use Direct Fetch.")}, status=400
+        )
+
+    plugin = station_link.network_connection.get_plugin()
+    start_date, end_date, _overridden, errors = _resolve_direct_fetch_window(
+        plugin, station_link, request.POST.get("from"), request.POST.get("to")
+    )
+    if errors:
+        return JsonResponse({"error": " ".join(str(e) for e in errors)}, status=400)
+
+    _paths, _paginator, page = _direct_fetch_page(
+        plugin, station_link, start_date, end_date, request.POST.get("p")
+    )
+    paths = list(page.object_list)
+    if not paths:
+        return JsonResponse({"results": [], "partial": False})
+
+    # Claimed before dialling, like the other on-demand probes: the wall clock
+    # bounds one sweep, nothing bounds ten of them against a dead host.
+    cooldown_key = _check_page_cooldown_key(station_link, start_date, end_date, page.number)
+    now = dj_timezone.now()
+    if not claim_probe_cooldown(cooldown_key, now):
+        claimed_at = read_probe_claim(cooldown_key)
+        when = dj_timezone.localtime(claimed_at).strftime("%H:%M:%S") if claimed_at else None
+        return JsonResponse({
+            "error": (
+                _("This page was checked at %(time)s. Give the server a minute "
+                  "before sweeping it again, or use Check on the rows you need.")
+                % {"time": when}
+                if when else
+                _("This page was checked a moment ago. Give the server a minute "
+                  "before sweeping it again, or use Check on the rows you need.")
+            ),
+        }, status=429)
+
+    try:
+        results, partial = _sweep_paths(
+            station_link.network_connection, paths, CHECK_PAGE_WALL_CLOCK_SECONDS
+        )
+    except (FTPError, SFTPError) as e:
+        return JsonResponse({"error": str(e.message)}, status=502)
+
+    return JsonResponse({"results": results, "partial": partial})

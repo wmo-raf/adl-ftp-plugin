@@ -92,6 +92,22 @@
     .dff-check-form {
         display: none;
     }
+
+    .dff-page-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .dff-page-actions__status {
+        color: var(--w-color-text-meta);
+    }
+
+    .dff-page-actions__status--error {
+        color: var(--w-color-critical-200);
+    }
 </style>
 {% endblock %}
 
@@ -126,7 +142,8 @@
     {% endblocktrans %}
     {% if can_check_remote %}
     {% blocktrans trimmed %}
-    Use <strong>Check</strong> on a row to ask the server whether that one file exists.
+    Use <strong>Check</strong> on a row to ask the server whether that one file exists, or
+    <strong>Check page</strong> to ask about every row on this page over one connection.
     {% endblocktrans %}
     {% endif %}
 </p>
@@ -202,11 +219,19 @@
 </form>
 
 {% if rows %}
-<p class="dff-count">
-    {% blocktrans trimmed with first=page_obj.start_index last=page_obj.end_index total=total_files %}
-    Showing {{ first }}–{{ last }} of {{ total }}
-    {% endblocktrans %}
-</p>
+<div class="dff-page-actions">
+    <p class="dff-count" style="margin: 0;">
+        {% blocktrans trimmed with first=page_obj.start_index last=page_obj.end_index total=total_files %}
+        Showing {{ first }}–{{ last }} of {{ total }}
+        {% endblocktrans %}
+    </p>
+    {% if can_check_remote %}
+    <button type="button" class="button button-small button-secondary" id="dff-check-page">
+        {% trans "Check page" %}
+    </button>
+    <span class="dff-page-actions__status" id="dff-check-page-status" aria-live="polite"></span>
+    {% endif %}
+</div>
 <table class="listing">
     <thead>
     <tr>
@@ -268,7 +293,9 @@
 {% include "wagtailadmin/shared/pagination_nav.html" with items=page_obj %}
 {% endif %}
 {% if can_check_remote %}
-<form class="dff-check-form" id="dff-check-form" data-url="{{ check_url }}">{% csrf_token %}</form>
+<form class="dff-check-form" id="dff-check-form" data-url="{{ check_url }}"
+      data-page-url="{{ check_page_url }}" data-from="{{ from_value }}" data-to="{{ to_value }}"
+      data-page="{{ page_number }}">{% csrf_token %}</form>
 {% endif %}
 {% elif not errors %}
 <div class="help-block help-info">
@@ -283,6 +310,7 @@
 
 {% block extra_js %}
 {{ block.super }}
+{% if can_check_remote %}
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         const form = document.getElementById('dff-check-form');
@@ -290,6 +318,7 @@
             return;
         }
         const url = form.dataset.url;
+        const pageUrl = form.dataset.pageUrl;
         const csrfToken = form.querySelector('input[name="csrfmiddlewaretoken"]').value;
         const labels = {
             checking: '{{ _("Checking…")|escapejs }}',
@@ -297,6 +326,10 @@
             missing: '{{ _("Not found")|escapejs }}',
             failed: '{{ _("Check failed")|escapejs }}',
             recheck: '{{ _("Re-check")|escapejs }}',
+            checkPage: '{{ _("Check page")|escapejs }}',
+            sweeping: '{{ _("Checking this page…")|escapejs }}',
+            swept: '{{ _("Checked %(count)s of %(total)s rows.")|escapejs }}',
+            sweptPartial: '{{ _("Checked %(count)s of %(total)s rows before the time budget ran out. Check the rest per row, or try again.")|escapejs }}',
         };
 
         const formatSize = (bytes) => {
@@ -316,34 +349,54 @@
             target.innerHTML = html;
         };
 
+        // One row's answer, rendered the same whether it came from that row's
+        // own button or from the whole-page sweep
+        const renderOutcome = (result, data) => {
+            if (!data || data.error) {
+                render(result, '<span class="dff-remote__error">' + labels.failed +
+                    (data && data.error ? ': ' + data.error : '') + '</span>');
+            } else if (data.exists) {
+                const size = formatSize(data.size);
+                render(result, '<span class="status-badge status-badge--success">' + labels.exists + '</span>' +
+                    (size ? '<span class="dff-remote__size">' + size + '</span>' : ''));
+            } else {
+                render(result, '<span class="status-badge status-badge--warning">' + labels.missing + '</span>');
+            }
+        };
+
+        const buttonsByPath = new Map();
+        document.querySelectorAll('.dff-check').forEach((button) => {
+            buttonsByPath.set(button.dataset.path, button);
+        });
+
+        const resultCellFor = (button) => button.closest('.dff-remote').querySelector('.dff-remote__result');
+
+        const post = async (endpoint, body) => {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrfToken,
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                body,
+                credentials: 'same-origin',
+            });
+            const data = await response.json();
+            if (!response.ok && !data.error) {
+                data.error = String(response.status);
+            }
+            return data;
+        };
+
         const check = async (button) => {
-            const cell = button.closest('.dff-remote');
-            const result = cell.querySelector('.dff-remote__result');
+            const result = resultCellFor(button);
             button.disabled = true;
             render(result, '<span class="dff-muted">' + labels.checking + '</span>');
 
             const body = new URLSearchParams();
             body.set('path', button.dataset.path);
             try {
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRFToken': csrfToken,
-                        'X-Requested-With': 'XMLHttpRequest',
-                    },
-                    body,
-                    credentials: 'same-origin',
-                });
-                const data = await response.json();
-                if (!response.ok || data.error) {
-                    render(result, '<span class="dff-remote__error">' + labels.failed + ': ' + (data.error || response.status) + '</span>');
-                } else if (data.exists) {
-                    const size = formatSize(data.size);
-                    render(result, '<span class="status-badge status-badge--success">' + labels.exists + '</span>' +
-                        (size ? '<span class="dff-remote__size">' + size + '</span>' : ''));
-                } else {
-                    render(result, '<span class="status-badge status-badge--warning">' + labels.missing + '</span>');
-                }
+                renderOutcome(result, await post(url, body));
             } catch (err) {
                 render(result, '<span class="dff-remote__error">' + labels.failed + '</span>');
             } finally {
@@ -355,6 +408,68 @@
         document.querySelectorAll('.dff-check').forEach((button) => {
             button.addEventListener('click', () => check(button));
         });
+
+        const pageButton = document.getElementById('dff-check-page');
+        const pageStatus = document.getElementById('dff-check-page-status');
+
+        const sweep = async () => {
+            const rowButtons = Array.from(buttonsByPath.values());
+            pageButton.disabled = true;
+            rowButtons.forEach((button) => {
+                button.disabled = true;
+                render(resultCellFor(button), '<span class="dff-muted">' + labels.checking + '</span>');
+            });
+            pageStatus.className = 'dff-page-actions__status';
+            pageStatus.textContent = labels.sweeping;
+
+            const body = new URLSearchParams();
+            body.set('from', form.dataset.from);
+            body.set('to', form.dataset.to);
+            body.set('p', form.dataset.page);
+            try {
+                const data = await post(pageUrl, body);
+                if (data.error) {
+                    pageStatus.className = 'dff-page-actions__status dff-page-actions__status--error';
+                    pageStatus.textContent = data.error;
+                    rowButtons.forEach((button) => render(resultCellFor(button), ''));
+                    return;
+                }
+                const answered = new Set();
+                (data.results || []).forEach((result) => {
+                    const button = buttonsByPath.get(result.path);
+                    if (button) {
+                        answered.add(result.path);
+                        renderOutcome(resultCellFor(button), result);
+                        button.textContent = labels.recheck;
+                    }
+                });
+                // Rows the sweep never reached keep no stale "Checking…"
+                buttonsByPath.forEach((button, path) => {
+                    if (!answered.has(path)) {
+                        render(resultCellFor(button), '');
+                    }
+                });
+                const template = data.partial ? labels.sweptPartial : labels.swept;
+                pageStatus.textContent = template
+                    .replace('%(count)s', answered.size)
+                    .replace('%(total)s', rowButtons.length);
+            } catch (err) {
+                pageStatus.className = 'dff-page-actions__status dff-page-actions__status--error';
+                pageStatus.textContent = labels.failed;
+                rowButtons.forEach((button) => render(resultCellFor(button), ''));
+            } finally {
+                pageButton.disabled = false;
+                pageButton.textContent = labels.checkPage;
+                rowButtons.forEach((button) => {
+                    button.disabled = false;
+                });
+            }
+        };
+
+        if (pageButton) {
+            pageButton.addEventListener('click', sweep);
+        }
     });
 </script>
+{% endif %}
 {% endblock %}
