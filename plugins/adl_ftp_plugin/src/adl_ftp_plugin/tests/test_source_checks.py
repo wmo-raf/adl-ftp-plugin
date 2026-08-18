@@ -9,9 +9,12 @@ core consumes.
 """
 
 import ast
+import fnmatch
 import os
+from datetime import timedelta
 from unittest import mock
 
+from adl.core.models import Network, Station
 from adl.core.source_checks import SourceCheckResult, SourceCheckStatus
 from django.test import SimpleTestCase
 from django.utils import timezone as dj_timezone
@@ -52,6 +55,16 @@ class FakeClient:
 
     def close(self):
         self.closed = True
+
+
+class FailAfterFirstListClient(FakeClient):
+    """Lists once, then fails — the "call 4 of 7 raises" shape from the idiom
+    table, where the count earned so far must survive."""
+
+    def list(self, path, extra=False):
+        if self.listed_paths:
+            raise FTPError("FTP permission error", 403)
+        return super().list(path, extra=extra)
 
 
 def make_connection(**kwargs):
@@ -239,42 +252,148 @@ class CheckStationSourceTests(SimpleTestCase):
         self.assertTrue(station_link_implements_check_station_source(make_station_link()))
 
 
-class StubStationLink:
-    """The minimal station-link surface get_station_data touches when the
-    listing itself is stubbed out."""
-
-    def __init__(self):
-        self.network_connection = mock.Mock()
-        self.station = mock.Mock()
-        self.station.name = "Station 1"
-
-
 class SourcesCountTests(SimpleTestCase):
+    """``adl_sources_count`` is committed only from something the source
+    actually told us, and only once it has told us. The listing seam is real
+    here — stubbing it out is what let wmo-raf/adl-ftp-plugin#4 hide."""
 
-    def collect(self, plugin, link, paths):
-        with mock.patch.object(AdlFtpPlugin, "_get_configured_decoder", return_value=mock.Mock()), \
-                mock.patch.object(AdlFtpPlugin, "_get_file_paths", return_value=iter(paths)), \
-                mock.patch.object(AdlFtpPlugin, "_process_file", return_value=iter(())):
-            return list(plugin.get_station_data(link))
+    def make_link(self, **kwargs):
+        link = make_station_link(**kwargs)
+        link.station = Station(name="Station 1")
+        link.network_connection.network = Network(name="FTP Network")
+        link.skip_already_downloaded_files = False
+        return link
 
-    def test_counts_resolved_files(self):
-        plugin, link = AdlFtpPlugin(), StubStationLink()
-        self.collect(plugin, link, ["/data/a.dat", "/data/b.dat", "/data/c.dat"])
-        self.assertEqual(link.adl_sources_count, 3)
+    def collect(self, link, client, process_file=None, start_date=None):
+        plugin = AdlFtpPlugin()
+        decoder = mock.Mock()
+        decoder.get_matching_files.side_effect = (
+            lambda station_link, files, start, end: [
+                f for f in files if fnmatch.fnmatch(f, station_link.file_pattern)
+            ]
+        )
+        if process_file is None:
+            def process_file(*args, **kwargs):
+                return iter(())
 
-    def test_zero_resolved_files_reports_zero_not_none(self):
-        plugin, link = AdlFtpPlugin(), StubStationLink()
-        self.collect(plugin, link, [])
+        with mock.patch.object(NetworkFTP, "get_client", return_value=client), \
+                mock.patch.object(AdlFtpPlugin, "_get_configured_decoder", return_value=decoder), \
+                mock.patch.object(AdlFtpPlugin, "_process_file", side_effect=process_file):
+            return list(plugin.get_station_data(link, start_date, None))
+
+    def test_counts_the_files_a_listing_matched(self):
+        link = self.make_link()
+        client = FakeClient(files=["STATION1_a.dat", "STATION1_b.dat", "other.txt"])
+        self.collect(link, client)
+        self.assertEqual(link.adl_sources_count, 2)
+
+    def test_a_listing_that_matched_nothing_reports_zero(self):
+        # The source answered and its answer was empty — that is the honest
+        # source-empty, and it is what layer 5 exists to see.
+        link = self.make_link()
+        self.collect(link, FakeClient(files=["unrelated.txt"]))
         self.assertEqual(link.adl_sources_count, 0)
 
-    def test_misconfigured_decoder_leaves_count_unset(self):
-        # "Did not look" must stay distinguishable from "looked, found
-        # nothing": a run that never reaches listing must not set the attribute
-        plugin, link = AdlFtpPlugin(), StubStationLink()
-        with mock.patch.object(AdlFtpPlugin, "_get_configured_decoder", return_value=None):
-            records = list(plugin.get_station_data(link))
+    def test_a_failed_listing_leaves_the_count_unset(self):
+        # wmo-raf/adl-ftp-plugin#4: a run whose LIST raised must not also
+        # assert the source offered nothing. Core abstains on NULL, so every
+        # failure path has a free correct answer.
+        link = self.make_link()
+        client = FakeClient(list_error=FTPError("FTP permission error", 403))
+        with self.assertRaises(FTPError):
+            self.collect(link, client)
+        self.assertIsNone(getattr(link, "adl_sources_count", None))
+
+    def test_a_failure_after_a_good_listing_keeps_the_count_it_earned(self):
+        # Right bias: we did see the source offering data, so the row acquits
+        # the source even though the run failed.
+        link = self.make_link(dir_structured_by_date=True, date_granularity="day")
+        client = FailAfterFirstListClient(files=["STATION1_a.dat", "STATION1_b.dat"])
+        two_days_ago = dj_timezone.now() - timedelta(days=2)
+        with self.assertRaises(FTPError):
+            self.collect(link, client, start_date=two_days_ago)
+        self.assertEqual(link.adl_sources_count, 2)
+
+    def test_a_run_that_never_reached_a_listing_leaves_the_count_unset(self):
+        # "Did not look" must stay distinguishable from "looked, found nothing"
+        link = self.make_link()
+        plugin = AdlFtpPlugin()
+        with mock.patch.object(NetworkFTP, "get_client", return_value=FakeClient()), \
+                mock.patch.object(AdlFtpPlugin, "_get_configured_decoder", return_value=None):
+            records = list(plugin.get_station_data(link, None, None))
         self.assertEqual(records, [])
-        self.assertFalse(hasattr(link, "adl_sources_count"))
+        self.assertIsNone(getattr(link, "adl_sources_count", None))
+
+    def test_the_count_is_committed_before_any_decoding(self):
+        # §6.1: source items are counted before mapping or conversion, so a
+        # decode failure still acquits the source.
+        link = self.make_link()
+
+        def failing_process(*args, **kwargs):
+            def gen():
+                return iter(())
+                yield  # pragma: no cover - generator marker
+            return gen()
+
+        self.collect(link, FakeClient(files=["STATION1_a.dat"]), process_file=failing_process)
+        self.assertEqual(link.adl_sources_count, 1)
+
+
+class DirectFetchSourcesCountTests(SimpleTestCase):
+    """DIRECT_FETCH constructs filenames instead of listing, so the count
+    cannot come from the file list — a constructed name is our guess, not the
+    source's offer, and counting those makes every run acquit the source."""
+
+    def make_link(self):
+        link = make_station_link(
+            file_pattern=None,
+            listing_strategy=FTPListingStrategy.DIRECT_FETCH,
+            direct_fetch_prefix="STATION1_",
+            direct_fetch_file_extension=".txt",
+            direct_fetch_datetime_format="YYYYMMDDHHMM",
+            direct_fetch_interval_minutes=10,
+        )
+        link.station = Station(name="Station 1")
+        link.network_connection.network = Network(name="FTP Network")
+        return link
+
+    def collect(self, link, outcomes):
+        """``outcomes`` is one True/False per attempted file: was it in hand?"""
+        plugin = AdlFtpPlugin()
+        remaining = list(outcomes)
+
+        def process_file(*args, **kwargs):
+            in_hand = remaining.pop(0)
+
+            def gen():
+                return in_hand
+                yield  # pragma: no cover - generator marker
+
+            return gen()
+
+        with mock.patch.object(NetworkFTP, "get_client", return_value=FakeClient()), \
+                mock.patch.object(AdlFtpPlugin, "_get_configured_decoder", return_value=mock.Mock()), \
+                mock.patch.object(AdlFtpPlugin, "_generate_direct_fetch_filenames",
+                                  return_value=[f"STATION1_{i}.txt" for i in range(len(remaining))]), \
+                mock.patch.object(AdlFtpPlugin, "_process_file", side_effect=process_file):
+            return list(plugin.get_station_data(link, None, None))
+
+    def test_counts_only_the_files_actually_in_hand(self):
+        link = self.make_link()
+        self.collect(link, [True, False, True])
+        self.assertEqual(link.adl_sources_count, 2)
+
+    def test_every_expected_file_absent_reports_zero(self):
+        # The server answered "not there" for each — a dead console, which is
+        # precisely the fault layer 5 should be able to name.
+        link = self.make_link()
+        self.collect(link, [False, False])
+        self.assertEqual(link.adl_sources_count, 0)
+
+    def test_no_attempt_at_all_leaves_the_count_unset(self):
+        link = self.make_link()
+        self.collect(link, [])
+        self.assertIsNone(getattr(link, "adl_sources_count", None))
 
 
 def make_upload(model=FTPUpload, **kwargs):
