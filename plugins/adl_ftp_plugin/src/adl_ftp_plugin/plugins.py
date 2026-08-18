@@ -166,7 +166,14 @@ class AdlFtpPlugin(Plugin):
         path = station_link.ftp_path
         timezone = station_link.timezone
 
-        # Build list of directory paths to process
+        # DIRECT_FETCH knows every filename it wants, and each one names the
+        # single directory it can be in — so it never enumerates directories.
+        if strategy == FTPListingStrategy.DIRECT_FETCH:
+            yield from self._direct_fetch_paths(station_link, start_date, end_date)
+            return
+
+        # PATTERN_ONLY / FILTER_BY_DATE discover files, so every directory in
+        # the window has to be listed.
         if station_link.dir_structured_by_date and station_link.date_granularity:
             dates = get_dates_to_now(
                 date_granularity=station_link.date_granularity,
@@ -178,51 +185,63 @@ class AdlFtpPlugin(Plugin):
             paths = [path]
 
         for current_path in paths:
-            if strategy == FTPListingStrategy.DIRECT_FETCH:
-                # No listing needed — construct filenames directly
-                filenames = self._generate_direct_fetch_filenames(station_link, start_date, end_date)
-                for filename in filenames:
-                    yield normalize_path(f"{current_path}/{filename}")
+            if not station_link.file_pattern:
+                logger.error(
+                    f"file_pattern is required for {strategy} strategy but is not set "
+                    f"for station {station_link.station.name}. Skipping path {current_path}."
+                )
+                continue
+
+            if not ftp_client.cd(current_path):
+                logger.warning(f"Path {current_path} not found")
+                continue
+
+            ftp_files_list = ftp_client.list(current_path, extra=True)
+            files_list = [file["name"] for file in ftp_files_list]
+
+            if strategy == FTPListingStrategy.FILTER_BY_DATE:
+                matching_files = decoder.get_matching_files(
+                    station_link, files_list, start_date, end_date
+                )
             else:
-                # PATTERN_ONLY / FILTER_BY_DATE — requires directory listing
-                if not station_link.file_pattern:
-                    logger.error(
-                        f"file_pattern is required for {strategy} strategy but is not set "
-                        f"for station {station_link.station.name}. Skipping path {current_path}."
-                    )
-                    continue
+                matching_files = decoder.get_matching_files(
+                    station_link, files_list, None, None
+                )
 
-                if not ftp_client.cd(current_path):
-                    logger.warning(f"Path {current_path} not found")
-                    continue
+            # The listing is in hand and parsed: this is the source's
+            # answer for this directory, and an empty one is still an
+            # answer.
+            if on_listing is not None:
+                on_listing(len(matching_files))
 
-                ftp_files_list = ftp_client.list(current_path, extra=True)
-                files_list = [file["name"] for file in ftp_files_list]
+            if not matching_files:
+                logger.debug(
+                    f"No files found for station {station_link.station.name} "
+                    f"matching pattern '{station_link.file_pattern}' in path {current_path}"
+                )
+                continue
 
-                if strategy == FTPListingStrategy.FILTER_BY_DATE:
-                    matching_files = decoder.get_matching_files(
-                        station_link, files_list, start_date, end_date
-                    )
-                else:
-                    matching_files = decoder.get_matching_files(
-                        station_link, files_list, None, None
-                    )
+            for file_name in matching_files:
+                yield normalize_path(f"{current_path}/{file_name}")
 
-                # The listing is in hand and parsed: this is the source's
-                # answer for this directory, and an empty one is still an
-                # answer.
-                if on_listing is not None:
-                    on_listing(len(matching_files))
+    def _direct_fetch_paths(self, station_link, start_date, end_date):
+        """
+        The remote path of every file DIRECT_FETCH expects over
+        ``[start_date, end_date]``, in time order.
 
-                if not matching_files:
-                    logger.debug(
-                        f"No files found for station {station_link.station.name} "
-                        f"matching pattern '{station_link.file_pattern}' in path {current_path}"
-                    )
-                    continue
+        Under ``dir_structured_by_date`` each file's directory is derived from
+        its own timestamp rather than by walking the window's directories and
+        offering all of the window's filenames to each. That walk cost
+        ``N_dirs x N_filenames`` RETR attempts, all but ``N_filenames`` of them
+        certain misses on any backfill (wmo-raf/adl-ftp-plugin#9).
 
-                for file_name in matching_files:
-                    yield normalize_path(f"{current_path}/{file_name}")
+        Note the two timezones: the tree is named in the station timezone,
+        while the filename carries ``direct_fetch_datetime_timezone``. Both are
+        read off the same instant, so a file near a local midnight lands in the
+        directory that instant belongs to.
+        """
+        for moment, filename in self._generate_direct_fetch_files(station_link, start_date, end_date):
+            yield normalize_path(f"{station_link.date_dir_for(moment)}/{filename}")
 
     def _process_path(self, station_link, path: str, decoder, ftp_client, start_date=None, end_date=None):
         for file_path in self._get_file_paths(station_link, ftp_client, decoder, start_date, end_date):
@@ -231,15 +250,19 @@ class AdlFtpPlugin(Plugin):
 
             yield from self._process_file(station_link, current_path, file_name, decoder, ftp_client)
 
-    def _generate_direct_fetch_filenames(self, station_link, start_date, end_date):
+    def _generate_direct_fetch_files(self, station_link, start_date, end_date):
         """
-        Generate expected filenames for a date range based on the station link's
-        direct fetch configuration — prefix, interval, timezone and extension.
+        The expected files for a date range, as ``(moment, filename)`` pairs.
+
+        The moment is the instant the filename encodes, kept alongside the name
+        because the caller needs it to place the file in the right date
+        directory — reading it back out of the name would mean parsing what we
+        just formatted.
 
         :param station_link: The station link configuration
         :param start_date: Start datetime (UTC)
         :param end_date: End datetime (UTC)
-        :return: List of filenames
+        :return: List of (datetime, filename) pairs
         """
         import pytz
 
@@ -266,25 +289,26 @@ class AdlFtpPlugin(Plugin):
             logger.error(f"Invalid datetime format for station {station_link.station.name}")
             return []
 
-        # Convert start/end to the filename timezone
-        local_start = dj_timezone.localtime(start_date, tz)
-        local_end = dj_timezone.localtime(end_date, tz)
-
         # Do not generate filenames beyond now — files in the future may not exist yet
-        now = dj_timezone.localtime(dj_timezone.now(), tz)
-        if local_end > now:
-            local_end = now
+        end = min(end_date, dj_timezone.now())
 
-        filenames = []
-        current = local_start
+        # The interval is a cadence in real time, so the walk steps in absolute
+        # instants and converts each one into the filename timezone. Stepping a
+        # localized datetime instead would carry the offset in force at the
+        # start across any DST transition, naming an hour that does not exist
+        # and — since the same instant chooses the date directory — looking for
+        # the file in the wrong day.
+        files = []
+        moment = start_date
 
-        while current <= local_end:
-            datetime_str = current.strftime(format_def["strptime"])
+        while moment <= end:
+            local = dj_timezone.localtime(moment, tz)
+            datetime_str = local.strftime(format_def["strptime"])
             filename = f"{prefix}{datetime_str}{extension}"
-            filenames.append(filename)
-            current += timedelta(minutes=interval)
+            files.append((moment, filename))
+            moment += timedelta(minutes=interval)
 
-        return filenames
+        return files
 
     def after_save_records(self, station_link, station_records, saved_records, qc_fail_results=None):
         """

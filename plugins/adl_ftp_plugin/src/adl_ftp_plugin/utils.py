@@ -151,30 +151,32 @@ def get_dates_to_now(
     return dates_list
 
 
+def get_date_path(root_path, date, date_granularity, month_dir_format=None):
+    """
+    The directory under ``root_path`` that ``date`` belongs to, carved to
+    ``date_granularity``. ``date`` must already be in the timezone the tree is
+    named in — this reads its fields, it does not convert.
+
+    :param str root_path: The root of the date-structured tree.
+    :param datetime date: The date the directory is named for.
+    :param str date_granularity: One of "year", "month", "day", "hour".
+    :param str month_dir_format: How the month component is spelled.
+    :return: The directory path.
+    :rtype: str
+    """
+
+    fields = ["year", "month", "day", "hour"]
+    depth = fields.index(date_granularity) + 1 if date_granularity in fields else 0
+    date_info = {field: getattr(date, field) for field in fields[:depth]}
+
+    return add_date_info_to_path(root_path, date_info, month_dir_format)
+
+
 def get_date_paths(root_path, dates, date_granularity, month_dir_format=None):
-    paths = []
-
-    for date in dates:
-        date_info = {}
-
-        year = date.year
-        month = date.month
-        day = date.day
-
-        if date_granularity == "year":
-            date_info.update({"year": year})
-        elif date_granularity == "month":
-            date_info.update({"year": year, "month": month})
-        elif date_granularity == "day":
-            date_info.update({"year": year, "month": month, "day": day})
-        elif date_granularity == "hour":
-            date_info.update({"year": year, "month": month, "day": day, "hour": date.hour})
-
-        path = add_date_info_to_path(root_path, date_info, month_dir_format)
-
-        paths.append(path)
-
-    return paths
+    return [
+        get_date_path(root_path, date, date_granularity, month_dir_format)
+        for date in dates
+    ]
 
 
 def get_month_dir_formatted(month_int, month_dir_format):
