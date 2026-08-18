@@ -135,15 +135,20 @@ class CheckSourceTests(SimpleTestCase):
         self.assertEqual(result.category, "AUTH_FAILED")
 
     def test_unreachable_host_reports_failed_without_invented_category(self):
-        # 502 collapses DNS, refused and TLS faults into one status, so the
-        # check declines a category rather than guessing one
-        error = FTPError("Unable to reach FTP host", 502)
+        # The client now classifies DNS and refused precisely, but both are
+        # layer-4 statements and core stamps this return layer 5 — so the
+        # check still declines a category rather than contradicting itself
+        # about which layer failed.
         connection = make_connection()
-        with mock.patch.object(NetworkFTP, "get_client", side_effect=error):
-            result = self.check(connection)
-        self.assertEqual(result.status, SourceCheckStatus.FAILED)
-        self.assertIsNone(result.category)
-        self.assertIn("Unable to reach FTP host", result.message)
+        for message, status in (("Could not resolve FTP host", 521),
+                                ("FTP host refused the connection", 522)):
+            with self.subTest(status=status):
+                error = FTPError(message, status)
+                with mock.patch.object(NetworkFTP, "get_client", side_effect=error):
+                    result = self.check(connection)
+                self.assertEqual(result.status, SourceCheckStatus.FAILED)
+                self.assertIsNone(result.category)
+                self.assertIn(message, result.message)
 
     def test_timeout_reports_tcp_timeout(self):
         error = FTPError("FTP connection timed out", 504)

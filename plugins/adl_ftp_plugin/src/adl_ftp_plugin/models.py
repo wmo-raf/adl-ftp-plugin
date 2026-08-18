@@ -55,13 +55,34 @@ SOURCE_CHECK_ERROR_CATEGORIES = {
 }
 
 
+# The categories check_source may claim. Core stamps its return layer 5 by
+# construction, so a layer-4 statement — DNS_FAILURE, TCP_REFUSED,
+# TLS_FAILURE — would have the diagnostic contradict itself about which layer
+# failed, however well the client classified it. TCP_TIMEOUT is the legitimate
+# exception: post-connect, it is a layer-5 read stall.
+SOURCE_CHECK_SAFE_CATEGORIES = frozenset({
+    "AUTH_FAILED",
+    "PERMISSION_DENIED",
+    "PATH_NOT_FOUND",
+    "PROTOCOL_ERROR",
+    "TCP_TIMEOUT",
+})
+
+
 def failed_source_check_result(error):
-    """A FAILED SourceCheckResult for an FTPError / SFTPError, with the
-    category derived from the error's status code where unambiguous."""
+    """A FAILED SourceCheckResult for an FTPError / SFTPError, carrying the
+    category the client classified where that category belongs at layer 5."""
     from adl.core.source_checks import SourceCheckResult, SourceCheckStatus
+
+    category = getattr(error, "adl_category", None)
+    if category is None:
+        category = SOURCE_CHECK_ERROR_CATEGORIES.get(error.status)
+    if category not in SOURCE_CHECK_SAFE_CATEGORIES:
+        category = None
+
     return SourceCheckResult(
         status=SourceCheckStatus.FAILED,
-        category=SOURCE_CHECK_ERROR_CATEGORIES.get(error.status),
+        category=category,
         message=str(error.message),
     )
 

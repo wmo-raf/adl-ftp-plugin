@@ -24,10 +24,21 @@ FTP_CONNECTION_ERRORS = (
 class FTPError(Exception):
     """ Base class for FTP errors """
 
-    def __init__(self, message, status):
+    def __init__(self, message, status, category=None, layer=None):
         super().__init__(message)
         self.message = message
         self.status = status
+        if category is None:
+            # Raised directly with a status rather than wrapped: the status
+            # still carries whatever meaning the table gives it.
+            category, layer = FTP_STATUS_CLASSIFICATION.get(status, (None, None))
+        # Duck-typed classification core reads off the raised exception
+        # (adl.core.classification). Carried forward from the exception this
+        # one replaces, so wrapping never costs a classification: core knows
+        # socket.gaierror and ssl.SSLError by type, and would classify them
+        # precisely if we let them through untouched.
+        self.adl_category = category
+        self.adl_layer = layer
 
     def __str__(self):
         return f"{self.message} ({self.status})"
@@ -87,8 +98,7 @@ class FTPClient:
                 self.conn.set_pasv(False)
 
         except FTP_CONNECTION_ERRORS as e:
-            message, status = map_ftp_error(e)
-            raise FTPError(message, status)
+            raise ftp_error_from(e)
 
     def get(self, path, local=None):
         if isinstance(local, IOBase):
@@ -101,8 +111,7 @@ class FTPClient:
         try:
             self.conn.retrbinary('RETR ' + path, local_file.write)
         except FTP_CONNECTION_ERRORS as e:
-            message, status = map_ftp_error(e)
-            raise FTPError(message, status)
+            raise ftp_error_from(e)
         finally:
             if not isinstance(local, IOBase) and local is not None:
                 local_file.close()
@@ -174,11 +183,9 @@ class FTPClient:
         except error_perm as e:
             if str(e).startswith("550"):
                 return {"exists": False, "size": None}
-            message, status = map_ftp_error(e)
-            raise FTPError(message, status)
+            raise ftp_error_from(e)
         except FTP_CONNECTION_ERRORS as e:
-            message, status = map_ftp_error(e)
-            raise FTPError(message, status)
+            raise ftp_error_from(e)
         return {"exists": True, "size": size}
 
     def pwd(self):
@@ -194,8 +201,7 @@ class FTPClient:
             else:
                 directory_list = self.conn.nlst(remote)
         except FTP_CONNECTION_ERRORS as e:
-            message, status = map_ftp_error(e)
-            raise FTPError(message, status)
+            raise ftp_error_from(e)
 
         if remove_relative_paths:
             return list(filter(self.is_not_relative_path, directory_list))
@@ -231,14 +237,44 @@ class FTPClient:
             self.conn.close()
 
 
+# status -> (category, layer) for the codes this module raises. A category is
+# claimed only where the cause is unambiguous; everything else declines, which
+# leaves the row to core's read-time tier rather than guessing at write time.
+# Layers: 4 = network path, 5 = source. None = declined.
+FTP_STATUS_CLASSIFICATION = {
+    401: ("AUTH_FAILED", 5),
+    403: ("PERMISSION_DENIED", 5),
+    404: ("PATH_NOT_FOUND", 5),
+    502: ("PROTOCOL_ERROR", 5),
+    503: ("PROTOCOL_ERROR", 5),
+    # Client-observed: no server code, so the category is honest but the
+    # layer is not knowable from the type alone.
+    504: ("TCP_TIMEOUT", None),
+    521: ("DNS_FAILURE", 4),
+    522: ("TCP_REFUSED", 4),
+    # A TLS error is usually handshake (4) but can be raised mid-read (5),
+    # and the type cannot tell — core declines the layer here too.
+    525: ("TLS_FAILURE", None),
+}
+
+
 def map_ftp_error(exc):
-    """Translate concrete exceptions to message + HTTP code."""
-    if isinstance(exc, (socket.gaierror, socket.herror, ConnectionRefusedError)):
-        return "Unable to reach FTP host", 502
+    """Translate concrete exceptions to message + status code.
+
+    The three codes below used to share 502, which threw away exactly the
+    distinctions core makes for free: a wrapper must never be less
+    classifiable than what it wraps. Each now carries its own code, and
+    :data:`FTP_STATUS_CLASSIFICATION` turns that back into the category and
+    layer the original type would have earned.
+    """
+    if isinstance(exc, (socket.gaierror, socket.herror)):
+        return "Could not resolve FTP host", 521
+    if isinstance(exc, ConnectionRefusedError):
+        return "FTP host refused the connection", 522
     if isinstance(exc, socket.timeout):
         return "FTP connection timed out", 504
     if isinstance(exc, ssl.SSLError):
-        return "TLS handshake with FTP server failed", 502
+        return "TLS handshake with FTP server failed", 525
     if isinstance(exc, error_perm):
         if str(exc).startswith("530"):
             return "FTP Authentication failed", 401
@@ -247,5 +283,13 @@ def map_ftp_error(exc):
         return "FTP server temporarily unavailable", 503
     if isinstance(exc, error_reply):
         return "Unexpected reply from FTP server", 502
-    # fallback
+    # fallback — an unrecognised type is our bug rather than the server's,
+    # so it declines a category (400 is absent from the table above)
     return f"{type(exc).__name__}: {exc}", 400
+
+
+def ftp_error_from(exc):
+    """The FTPError replacing ``exc``, classified as ``exc`` would have been."""
+    message, status = map_ftp_error(exc)
+    category, layer = FTP_STATUS_CLASSIFICATION.get(status, (None, None))
+    return FTPError(message, status, category=category, layer=layer)

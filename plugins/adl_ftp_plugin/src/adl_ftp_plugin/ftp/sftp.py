@@ -26,10 +26,19 @@ SFTP_CONNECTION_ERRORS = (
 class SFTPError(Exception):
     """ Base class for SFTP errors """
 
-    def __init__(self, message, status):
+    def __init__(self, message, status, category=None, layer=None):
         super().__init__(message)
         self.message = message
         self.status = status
+        if category is None:
+            # Raised directly with a status rather than wrapped: the status
+            # still carries whatever meaning the table gives it.
+            category, layer = SFTP_STATUS_CLASSIFICATION.get(status, (None, None))
+        # Duck-typed classification core reads off the raised exception
+        # (adl.core.classification), carried forward from the exception this
+        # one replaces so wrapping never costs a classification.
+        self.adl_category = category
+        self.adl_layer = layer
 
     def __str__(self):
         return f"{self.message} (HTTP {self.status})"
@@ -107,8 +116,7 @@ class SFTPClient:
             self.sftp = self.ssh.open_sftp()
 
         except SFTP_CONNECTION_ERRORS as e:
-            message, status = map_sftp_error(e)
-            raise SFTPError(message, status)
+            raise sftp_error_from(e)
 
     def get(self, path, local=None):
         """
@@ -435,19 +443,48 @@ class SFTPClient:
             pass
 
 
+# status -> (category, layer) for the codes this module raises. SSH is not
+# TLS and has no reply-code vocabulary, so only three causes are unambiguous
+# enough to claim; the rest decline and fall to core's read-time tier.
+SFTP_STATUS_CLASSIFICATION = {
+    401: ("AUTH_FAILED", 5),
+    404: ("PATH_NOT_FOUND", 5),
+    # Client-observed: no server code, so no layer can be claimed.
+    504: ("TCP_TIMEOUT", None),
+    521: ("DNS_FAILURE", 4),
+    522: ("TCP_REFUSED", 4),
+}
+
+
 def map_sftp_error(exc):
-    """Translate concrete exceptions to message + HTTP code."""
-    if isinstance(exc, (socket.gaierror, socket.herror, ConnectionRefusedError)):
-        return "Unable to reach SSH host", 502
+    """Translate concrete exceptions to message + status code.
+
+    DNS failures and connection refusals used to share 502 with every generic
+    SSH fault, which discarded the classification core makes for those two
+    types by itself.
+    """
+    if isinstance(exc, (socket.gaierror, socket.herror)):
+        return "Could not resolve SSH host", 521
+    if isinstance(exc, ConnectionRefusedError):
+        return "SSH host refused the connection", 522
     if isinstance(exc, socket.timeout):
         return "SSH connection timed out", 504
     if isinstance(exc, paramiko.AuthenticationException):
         return "SSH Authentication failed", 401
     if isinstance(exc, paramiko.BadHostKeyException):
-        return "SSH host key verification failed", 502
+        # Not AUTH_FAILED: the credential was never offered, and no category
+        # in the vocabulary means "the host is not who it claims to be".
+        return "SSH host key verification failed", 526
     if isinstance(exc, paramiko.SSHException):
         return f"SSH error: {str(exc)}", 502
     if isinstance(exc, paramiko.ChannelException):
         return f"SFTP channel error: {str(exc)}", 502
-    # fallback
+    # fallback — our bug rather than the server's, so it declines a category
     return str(exc), 400
+
+
+def sftp_error_from(exc):
+    """The SFTPError replacing ``exc``, classified as ``exc`` would have been."""
+    message, status = map_sftp_error(exc)
+    category, layer = SFTP_STATUS_CLASSIFICATION.get(status, (None, None))
+    return SFTPError(message, status, category=category, layer=layer)
