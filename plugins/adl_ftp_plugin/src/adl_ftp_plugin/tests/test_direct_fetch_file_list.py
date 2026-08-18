@@ -4,11 +4,13 @@ of the remote paths the next ingestion run would try under ``DIRECT_FETCH``
 plus whether ADL already holds each file. Pure computation — the page and
 the plugin dry-run it calls must never open an FTP/SFTP connection.
 """
+import time
 from datetime import datetime, timezone as dt_timezone
 from unittest import mock
 
 from adl.core.tests.factories import StationFactory
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from django.utils import timezone as dj_timezone
@@ -421,6 +423,200 @@ class DirectFetchFileCheckViewTests(TestCase):
         page = self.client.get(self.list_url, {"from": "2026-08-17T10:00", "to": "2026-08-17T10:00"})
         self.assertTrue(page.context["can_check_remote"])
         self.assertContains(page, 'data-path="/data/station1/STATION1_202608171000.txt"')
+        self.assertContains(page, self.url)
+
+
+# ---------------------------------------------------------------------------
+# Whole-page remote sweep
+# ---------------------------------------------------------------------------
+
+class SlowStatClient(FakeStatClient):
+    """A stub client whose every stat_file() takes ``delay`` seconds."""
+
+    def __init__(self, delay, **kwargs):
+        super().__init__(**kwargs)
+        self.delay = delay
+
+    def stat_file(self, path):
+        time.sleep(self.delay)
+        return super().stat_file(path)
+
+
+class DirectFetchCheckPageViewTests(TestCase):
+    """
+    One press, one connection, every path on the page — the sweep the per-row
+    button cannot give without 200 handshakes. The paths are recomputed from
+    the same window the page was rendered with, never taken from the client.
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.admin = get_user_model().objects.create_superuser("admin", "admin@example.test", "pw")
+        self.client.force_login(self.admin)
+        self.connection = make_connection(
+            plugin="adl_ftp_plugin", name="Direct FTP", username="u", password="p"
+        )
+        self.connection.network = StationFactory().network
+        self.connection.save()
+        self.link = FTPStationLink.objects.create(
+            network_connection=self.connection,
+            station=StationFactory(network=self.connection.network),
+            **DIRECT_FETCH_KWARGS,
+        )
+        self.url = reverse("ftp_direct_fetch_file_check_page", args=[self.link.pk])
+        self.list_url = reverse("ftp_direct_fetch_file_list", args=[self.link.pk])
+
+    def _post(self, fake, **params):
+        params.setdefault("from", "2026-08-17T10:00")
+        params.setdefault("to", "2026-08-17T10:20")
+        counting = mock.Mock(return_value=fake)
+        with mock.patch.object(NetworkFTP, "get_client", counting):
+            response = self.client.post(self.url, params)
+        self.connects = counting.call_count
+        return response
+
+    def test_sweeps_the_whole_page_over_one_connection(self):
+        first = "/data/station1/STATION1_202608171000.txt"
+        fake = FakeStatClient({first: {"exists": True, "size": 512}})
+        response = self._post(fake)
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertFalse(body["partial"])
+        self.assertEqual([r["path"] for r in body["results"]], [
+            first,
+            "/data/station1/STATION1_202608171010.txt",
+            "/data/station1/STATION1_202608171020.txt",
+        ])
+        self.assertEqual(body["results"][0], {"path": first, "exists": True, "size": 512})
+        self.assertEqual(body["results"][1], {"path": body["results"][1]["path"],
+                                              "exists": False, "size": None})
+        self.assertEqual(self.connects, 1)
+        self.assertEqual(len(fake.asked), 3)
+        self.assertTrue(fake.closed)
+
+    def test_a_failing_path_is_reported_and_the_sweep_continues(self):
+        from adl_ftp_plugin.ftp import FTPError
+
+        class OneBadPath(FakeStatClient):
+            def stat_file(self, path):
+                if path.endswith("1010.txt"):
+                    raise FTPError("530 Not logged in", 502)
+                return super().stat_file(path)
+
+        fake = OneBadPath()
+        response = self._post(fake)
+        body = response.json()
+        self.assertEqual(len(body["results"]), 3)
+        self.assertEqual(body["results"][1]["error"], "530 Not logged in")
+        self.assertNotIn("exists", body["results"][1])
+        self.assertEqual(len(fake.asked), 2)  # the bad path raises before it records
+        self.assertTrue(fake.closed)
+
+    def test_only_the_requested_page_is_swept(self):
+        # 10-minute files over 34 hours = 205 paths, so page 2 holds five
+        response = self._post(FakeStatClient(), **{
+            "from": "2026-08-17T00:00", "to": "2026-08-18T10:00", "p": "2",
+        })
+        body = response.json()
+        self.assertEqual(len(body["results"]), 5)
+        self.assertEqual(body["results"][0]["path"],
+                         "/data/station1/STATION1_202608180920.txt")
+
+    def test_a_slow_host_returns_what_was_answered_and_says_it_is_partial(self):
+        from adl_ftp_plugin import views
+
+        fake = SlowStatClient(0.2)
+        with mock.patch.object(views, "CHECK_PAGE_WALL_CLOCK_SECONDS", 0.3):
+            response = self._post(fake, **{"from": "2026-08-17T10:00", "to": "2026-08-17T11:00"})
+        body = response.json()
+        self.assertTrue(body["partial"])
+        self.assertLess(len(body["results"]), 7)
+        self.assertTrue(fake.closed)
+
+    def test_a_dead_host_is_reported_as_502(self):
+        from adl_ftp_plugin.ftp import FTPError
+        counting = mock.Mock(side_effect=FTPError("Unable to reach FTP host", 502))
+        with mock.patch.object(NetworkFTP, "get_client", counting):
+            response = self.client.post(self.url, {"from": "2026-08-17T10:00",
+                                                   "to": "2026-08-17T10:20"})
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["error"], "Unable to reach FTP host")
+
+    def test_a_connect_that_ran_out_of_time_keeps_its_own_status(self):
+        from adl_ftp_plugin.ftp import FTPError
+        with mock.patch.object(NetworkFTP, "get_client",
+                               mock.Mock(side_effect=FTPError("Took too long", 504))):
+            response = self.client.post(self.url, {"from": "2026-08-17T10:00",
+                                                   "to": "2026-08-17T10:20"})
+        self.assertEqual(response.status_code, 504)
+
+    def test_a_repeat_sweep_of_the_same_page_is_held_off(self):
+        self.assertEqual(self._post(FakeStatClient()).status_code, 200)
+        second = self._post(FakeStatClient())
+        self.assertEqual(second.status_code, 429)
+        self.assertTrue(second.json()["error"])
+        self.assertEqual(self.connects, 0)
+        # A different page is a different target, so it is not held off
+        other = self._post(FakeStatClient(), **{"from": "2026-08-17T00:00",
+                                                "to": "2026-08-18T10:00", "p": "2"})
+        self.assertEqual(other.status_code, 200)
+
+    def test_the_page_posts_the_window_it_resolved(self):
+        # The default window ends at "now"; posting the raw (empty) query back
+        # would let it slide between render and press
+        page = self.client.get(self.list_url)
+        resolved_start = dj_timezone.localtime(
+            page.context["start_date"], self.link.timezone
+        ).isoformat()
+        self.assertContains(page, 'data-from="%s"' % resolved_start)
+
+    def test_the_posted_window_wins_over_a_moved_default_window(self):
+        moved = (datetime(2027, 1, 1, tzinfo=UTC), datetime(2027, 1, 1, 0, 10, tzinfo=UTC))
+        with mock.patch.object(AdlFtpPlugin, "get_dates_for_station", return_value=moved):
+            body = self._post(FakeStatClient()).json()
+        self.assertEqual([r["path"] for r in body["results"]], [
+            "/data/station1/STATION1_202608171000.txt",
+            "/data/station1/STATION1_202608171010.txt",
+            "/data/station1/STATION1_202608171020.txt",
+        ])
+
+    def test_an_unreadable_window_is_refused_before_any_connection(self):
+        response = self._post(FakeStatClient(), **{"from": "not-a-date"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.connects, 0)
+
+    def test_a_window_with_no_files_answers_without_connecting(self):
+        with mock.patch.object(AdlFtpPlugin, "get_station_file_paths", return_value=[]):
+            response = self._post(FakeStatClient())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"results": [], "partial": False})
+        self.assertEqual(self.connects, 0)
+
+    def test_get_is_not_allowed(self):
+        self.assertEqual(self.client.get(self.url).status_code, 405)
+
+    def test_non_direct_fetch_link_is_refused(self):
+        self.link.listing_strategy = FTPListingStrategy.PATTERN_ONLY
+        self.link.file_pattern = "STATION1_*.txt"
+        self.link.save()
+        self.assertEqual(self._post(FakeStatClient()).status_code, 400)
+
+    def test_viewer_cannot_sweep_and_sees_no_button(self):
+        from django.contrib.auth.models import Permission
+        viewer = get_user_model().objects.create_user("viewer", "v@example.test", "pw")
+        viewer.user_permissions.add(
+            Permission.objects.get(codename="access_admin"),
+            Permission.objects.get(codename="view_ftpstationlink"),
+        )
+        self.client.force_login(viewer)
+        page = self.client.get(self.list_url, {"from": "2026-08-17T10:00", "to": "2026-08-17T10:20"})
+        self.assertNotContains(page, "dff-check-page")
+        self.assertIn(self._post(FakeStatClient()).status_code, (302, 403))
+        self.assertEqual(self.connects, 0)
+
+    def test_manager_sees_the_page_button(self):
+        page = self.client.get(self.list_url, {"from": "2026-08-17T10:00", "to": "2026-08-17T10:20"})
+        self.assertContains(page, "dff-check-page")
         self.assertContains(page, self.url)
 
 
