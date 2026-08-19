@@ -1,6 +1,5 @@
 {
   "name": "ADL FTP Plugin",
-  "version": "0.12.0",
   "description": "ADL Plugin for automated observation data loading from FTP storages",
   "author": "WMO RAF",
   "author_url": "https://github.com/wmo-raf",
