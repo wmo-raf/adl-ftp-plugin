@@ -723,9 +723,13 @@ class FTPStationLink(StationLink):
         blank=True,
         null=True,
         validators=[validate_start_date],
-        verbose_name=_("Start Date"),
-        help_text=_("Start date for data pulling. Select a past date to include the "
-                    "historical data. Leave blank for collecting realtime data only"),
+        verbose_name=_("Collection Start Date"),
+        help_text=_(
+            "Collection never starts before this date. On the first run it is "
+            "the start of the backfill; afterwards, moving it forward past the "
+            "latest saved record skips the gap. Leave empty to collect only "
+            "from now onwards."
+        ),
     )
     skip_already_downloaded_files = models.BooleanField(
         default=True,
