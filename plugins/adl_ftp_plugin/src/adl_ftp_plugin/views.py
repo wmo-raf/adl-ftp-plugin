@@ -31,9 +31,10 @@ from .decoder_variables import (
     get_decoder_variables,
     get_unmapped_decoder_variables,
 )
+from .file_matching import parse_date_from_filename
 from .forms import DecoderVariableMappingFormSet, TestCSVConfigForm
 from .ftp import FTPError
-from .ftp.ftp_utils import clean_remote_path, get_ftp_dir_list, parse_date_from_filename
+from .ftp.ftp_utils import clean_remote_path, get_ftp_dir_list
 from .ftp.sftp import SFTPError
 from .utils import normalize_path
 from .models import FTPListingStrategy, FTPStationDataFile, FTPStationLink, NetworkFTP
