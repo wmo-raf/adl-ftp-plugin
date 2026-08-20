@@ -423,12 +423,16 @@ class NetworkFTP(NetworkConnection):
                     'password': _("Password is required for FTP/FTPS connections")
                 })
 
-        # Validate decoder-specific requirements
-        if self.decoder == "standard_csv":
-            if not self.csv_config:
-                raise ValidationError({
-                    'csv_config': _("CSV Configuration is required when using 'Standard CSV' decoder")
-                })
+        # Validate decoder-specific requirements. The decoder itself says
+        # whether it needs a configuration (see decoder_resolution), so this
+        # check and the one an ingestion run makes cannot drift apart.
+        from .decoder_resolution import decoder_requires_config
+        if self.decoder and decoder_requires_config(self.decoder) and not self.csv_config:
+            raise ValidationError({
+                'csv_config': _("CSV Configuration is required when using '%(decoder)s' decoder") % {
+                    "decoder": self.get_decoder_display()
+                }
+            })
 
     def get_extra_model_admin_links(self):
         from .viewsets import StandardCSVConfigViewSet, TestDecoderConfigViewSet

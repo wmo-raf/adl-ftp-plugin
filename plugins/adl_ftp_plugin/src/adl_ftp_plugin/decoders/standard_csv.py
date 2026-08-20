@@ -15,16 +15,21 @@ class StandardCSVDecoder(FTPDecoder):
     type = "standard_csv"
     compat_type = "standard_csv"
     display_name = "Standard CSV"
+    requires_config = True
 
-    def decode(self, file_path):
+    def decode(self, file_path, config=None):
         """
         Decodes a standard CSV file based on configuration.
 
         :param file_path: Path to the CSV file
+        :param config: The ``StandardCSVConfig`` to decode with. Callers that
+            resolved this decoder through ``decoder_resolution`` always pass
+            one; the ``_config`` fallback is only for a caller that predates
+            the argument and still assigns the config to the instance.
         :return: Dictionary with 'values' key containing list of records
         """
-        # This will be set by the plugin before calling decode
-        config = getattr(self, '_config', None)
+        if config is None:
+            config = getattr(self, '_config', None)
         if not config:
             raise ValueError("CSV configuration not set. Ensure csv_config is configured in NetworkFTP.")
 
