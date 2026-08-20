@@ -1,9 +1,7 @@
-import fnmatch
-
 from adl.core.registry import Registry, Instance
 from django.core.exceptions import ImproperlyConfigured
 
-from .ftp.ftp_utils import filter_files_by_date_range
+from .file_matching import match_files
 
 
 class FTPDecoder(Instance):
@@ -67,6 +65,10 @@ class FTPDecoder(Instance):
         """
         Returns a list of files that match the decoder and date range.
 
+        Reads the matching configuration off the station link and hands it to
+        :func:`adl_ftp_plugin.file_matching.match_files`; override this only
+        to change *which* files a decoder wants, not how names are matched.
+
         :param station_link: The station link that is used to collect the data.
         :type station_link: adl_ftp_plugin.models.FTPStationLink
         :param files: The list of files that should be checked.
@@ -78,22 +80,18 @@ class FTPDecoder(Instance):
         """
         from .models import FTPListingStrategy
 
-        pattern = station_link.file_pattern
+        # Only FILTER_BY_DATE reads dates out of filenames; the other
+        # strategies want every name the pattern matches.
+        filters_by_date = station_link.listing_strategy == FTPListingStrategy.FILTER_BY_DATE
 
-        # Filter files by pattern
-        matching_files = [file for file in files if fnmatch.fnmatch(file, pattern)]
-
-        # If strategy is filter_by_date, filter by date in filename
-        if station_link.listing_strategy == FTPListingStrategy.FILTER_BY_DATE and station_link.filename_date_format:
-            matching_files = filter_files_by_date_range(
-                matching_files,
-                station_link.filename_date_format,
-                start_date,
-                end_date,
-                tz=station_link.filename_date_timezone
-            )
-
-        return matching_files
+        return match_files(
+            files,
+            station_link.file_pattern,
+            filename_date_format=station_link.filename_date_format if filters_by_date else None,
+            start_date=start_date,
+            end_date=end_date,
+            tz=station_link.filename_date_timezone,
+        )
 
 
 class FTPDecoderRegistry(Registry):
