@@ -24,8 +24,8 @@ class StandardCSVDecoder(FTPDecoder):
         :param file_path: Path to the CSV file
         :param config: The ``StandardCSVConfig`` to decode with. Callers that
             resolved this decoder through ``decoder_resolution`` always pass
-            one; the ``_config`` fallback is for a caller that still assigns
-            it to the instance.
+            one; the ``_config`` fallback is only for a caller that predates
+            the argument and still assigns the config to the instance.
         :return: Dictionary with 'values' key containing list of records
         """
         if config is None:

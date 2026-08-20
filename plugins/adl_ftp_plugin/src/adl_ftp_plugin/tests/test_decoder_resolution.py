@@ -16,11 +16,13 @@ import os
 import tempfile
 from types import SimpleNamespace
 
+from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase
 
 from adl_ftp_plugin.decoder_resolution import (
     ConfiguredDecoder,
     decode_file,
+    decoder_requires_config,
     resolve_decoder,
     resolve_decoder_for_connection,
 )
@@ -119,17 +121,6 @@ class ConfigTravelsPerCallTests(DecoderResolutionTestBase):
         configured = resolve_decoder(LEGACY_TYPE)
         self.assertEqual(configured.decode("/tmp/a.csv"), {"values": [{"file_path": "/tmp/a.csv"}]})
 
-    def test_a_legacy_decoder_handed_a_config_reads_it_off_the_attribute(self):
-        # Nothing in the tree needs this today — standard_csv is the only
-        # decoder with a config — but a third-party decoder that grew a
-        # ``_config`` habit must not silently decode with no config at all.
-        config = csv_config("one")
-        legacy = LegacyDecoder()
-        self.assertEqual(
-            decode_file(legacy, "/tmp/a.csv", config)["values"][0]["file_path"], "/tmp/a.csv"
-        )
-        self.assertIs(legacy._config, config)
-
     def test_decode_file_passes_nothing_when_there_is_no_config(self):
         self.assertEqual(
             decode_file(ConfigAwareDecoder(), "/tmp/a.csv")["values"][0]["config"], None
@@ -157,6 +148,36 @@ class ConfiguredDecoderTests(DecoderResolutionTestBase):
             configured.get_matching_files(station_link, ["STATION1_1.dat", "other.txt"]),
             ["STATION1_1.dat"],
         )
+
+
+class RequiresConfigRuleTests(DecoderResolutionTestBase):
+    """One rule, asked of the decoder — so the connection form and an
+    ingestion run cannot disagree about what needs configuring."""
+
+    def test_a_decoder_says_for_itself_whether_it_needs_a_config(self):
+        self.assertTrue(decoder_requires_config("standard_csv"))
+        self.assertTrue(decoder_requires_config(CONFIG_AWARE_TYPE))
+        self.assertFalse(decoder_requires_config(LEGACY_TYPE))
+
+    def test_an_unregistered_decoder_needs_nothing(self):
+        self.assertFalse(decoder_requires_config("does_not_exist"))
+
+
+class ConnectionValidationTests(DecoderResolutionTestBase):
+    """The admin refuses what a run would refuse, off the same rule."""
+
+    def test_a_connection_is_invalid_without_the_config_its_decoder_needs(self):
+        with self.assertRaises(ValidationError) as raised:
+            make_connection(CONFIG_AWARE_TYPE).clean()
+        self.assertIn("csv_config", raised.exception.message_dict)
+
+    def test_a_decoder_needing_no_config_validates_without_one(self):
+        make_connection(LEGACY_TYPE).clean()  # does not raise
+
+    def test_the_csv_decoder_still_demands_its_config(self):
+        with self.assertRaises(ValidationError) as raised:
+            make_connection("standard_csv").clean()
+        self.assertIn("csv_config", raised.exception.message_dict)
 
 
 class ResolveForConnectionTests(DecoderResolutionTestBase):

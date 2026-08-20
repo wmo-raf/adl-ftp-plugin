@@ -154,6 +154,9 @@ whole process, so a configuration written onto it would be read by whichever con
 decoder with `adl_ftp_plugin.decoder_resolution.resolve_decoder_for_connection(connection)`, which returns the decoder
 bound to that connection's configuration (or `None` when a decoder that needs one has none set).
 
+`requires_config` is also what the connection form checks: a connection whose decoder declares it cannot be saved
+without a *CSV Configuration*, so the admin refuses exactly what a run would refuse.
+
 A decoder that needs no configuration keeps the plain `decode(self, file_path)` signature — it is never handed one.
 
 #### Declaring decoder variables

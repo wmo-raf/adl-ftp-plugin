@@ -36,20 +36,15 @@ except ImportError:  # pragma: no cover - older core
 
 logger = logging.getLogger(__name__)
 
-VALUES_SAVED_ATTR = "_adl_file_values_saved"
-
-LEGACY_VALUES_SAVED_ATTR = "_adl_ftp_values_saved"
-"""The name this counter shipped under while it was FTP-only. Kept in step so
-anything still reading it — an old subclass, a test double — sees the same
-number."""
-
-_VALUES_SAVED_ATTRS = (VALUES_SAVED_ATTR, LEGACY_VALUES_SAVED_ATTR)
+VALUES_SAVED_ATTR = "_adl_ftp_values_saved"
+"""The attribute the count is handed over on. The name is what it shipped as
+while this was FTP-only; it is kept so nothing that reads it has to change, and
+callers use these functions rather than the name anyway."""
 
 
 def reset_values_saved(station_link):
     """Open a file's counting window: from here, count from zero."""
-    for attr in _VALUES_SAVED_ATTRS:
-        setattr(station_link, attr, 0)
+    setattr(station_link, VALUES_SAVED_ATTR, 0)
 
 
 def add_values_saved(station_link, count):
@@ -60,9 +55,8 @@ def add_values_saved(station_link, count):
     saving records that did not come from a staged file — there is nothing to
     add to and nothing happens.
     """
-    for attr in _VALUES_SAVED_ATTRS:
-        if hasattr(station_link, attr):
-            setattr(station_link, attr, getattr(station_link, attr) + count)
+    if hasattr(station_link, VALUES_SAVED_ATTR):
+        setattr(station_link, VALUES_SAVED_ATTR, getattr(station_link, VALUES_SAVED_ATTR) + count)
 
 
 def read_values_saved(station_link):

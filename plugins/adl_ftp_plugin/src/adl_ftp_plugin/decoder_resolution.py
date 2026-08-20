@@ -15,36 +15,25 @@ returns a :class:`ConfiguredDecoder` — one connection's decoder-and-config pai
 — and decoding passes the config as an argument. Nothing is written back onto
 the registry.
 
-Third-party decoders whose ``decode()`` predates the argument still work: they
-declare no config (so none is passed), and one that does want configuration
-handed to it the old way still gets it through ``_config``.
+Third-party decoders whose ``decode()`` predates the argument are unaffected:
+they declare no config, so none is passed and they are called exactly as
+before.
 """
 
-import inspect
 import logging
-from functools import lru_cache
 
 from .registries import ftp_decoder_registry
 
 logger = logging.getLogger(__name__)
 
 
-@lru_cache(maxsize=None)
-def _accepts_config(decode_function):
-    """Does this ``decode`` implementation take a ``config`` argument?"""
-    try:
-        parameters = inspect.signature(decode_function).parameters.values()
-    except (TypeError, ValueError):  # a callable Python cannot introspect
-        return False
-    return any(
-        parameter.name == "config" or parameter.kind is inspect.Parameter.VAR_KEYWORD
-        for parameter in parameters
-    )
-
-
 def decode_file(decoder, file_path, config=None):
     """
     Decode ``file_path`` with ``decoder``, handing it ``config``.
+
+    A decoder is only ever handed a config it asked for by declaring
+    ``requires_config``, and declaring that is what commits it to accepting the
+    argument.
 
     :param decoder: A registered decoder instance
     :param file_path: Local path of the file to decode
@@ -54,14 +43,7 @@ def decode_file(decoder, file_path, config=None):
     if config is None:
         return decoder.decode(file_path)
 
-    if _accepts_config(getattr(decoder.decode, "__func__", decoder.decode)):
-        return decoder.decode(file_path, config=config)
-
-    # A decoder written before the argument existed. The attribute is the only
-    # way in, so use it — knowing it is the shared registry instance being
-    # written to, which is why nothing in this plugin relies on it any more.
-    decoder._config = config
-    return decoder.decode(file_path)
+    return decoder.decode(file_path, config=config)
 
 
 class ConfiguredDecoder:
@@ -91,6 +73,23 @@ class ConfiguredDecoder:
         return f"<ConfiguredDecoder {self.decoder!r} config={self.config!r}>"
 
 
+def decoder_requires_config(decoder_name):
+    """
+    Does the decoder registered under ``decoder_name`` need the connection's
+    ``csv_config``? ``False`` for a name that is not registered — the caller
+    cannot ask a decoder it does not have.
+
+    This is the one place the rule lives: resolution refuses a connection that
+    breaks it, and ``NetworkFTP.clean()`` stops the connection being saved that
+    way in the first place.
+    """
+    try:
+        decoder = ftp_decoder_registry.get(decoder_name)
+    except Exception:  # unknown decoder name, plugin not installed, ...
+        return False
+    return bool(getattr(decoder, "requires_config", False))
+
+
 def resolve_decoder(decoder_name, csv_config=None, task_logger=None):
     """
     The registered decoder for ``decoder_name``, bound to ``csv_config`` if it
@@ -112,13 +111,14 @@ def resolve_decoder(decoder_name, csv_config=None, task_logger=None):
         log.error(f"Decoder {decoder_name} not found in decoder registry.")
         return None
 
-    if getattr(decoder, "requires_config", False):
-        if not csv_config:
-            log.error(f"Decoder {decoder_name} selected but no CSV configuration set.")
-            return None
-        return ConfiguredDecoder(decoder, csv_config)
+    if not getattr(decoder, "requires_config", False):
+        return ConfiguredDecoder(decoder)
 
-    return ConfiguredDecoder(decoder)
+    if not csv_config:
+        log.error(f"Decoder {decoder_name} selected but no CSV configuration set.")
+        return None
+
+    return ConfiguredDecoder(decoder, csv_config)
 
 
 def resolve_decoder_for_connection(connection, task_logger=None):

@@ -31,15 +31,7 @@ class AdlFtpPlugin(Plugin):
         return ftp_decoder_registry.get(decoder_name)
 
     def _get_configured_decoder(self, network_conn_ftp):
-        """
-        The connection's decoder, bound to the configuration that connection
-        wants it to use. Returns None if the decoder is not found or is
-        missing the configuration it needs.
-
-        The binding matters: the registry holds one decoder instance for the
-        whole process, so a config written onto it would be read by whichever
-        station link decodes next.
-        """
+        """The connection's decoder bound to its configuration, or None."""
         return resolve_decoder_for_connection(network_conn_ftp, task_logger=self.get_logger())
 
     def get_default_start_date(self, station_link):
