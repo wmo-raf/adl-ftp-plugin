@@ -5,7 +5,9 @@ A decoder may declare the variables it emits via ``FTPDecoder.get_variables()``
 (see ``registries.py`` for the entry schema). These helpers normalise that
 declaration, work out which variables a connection has not mapped yet, resolve
 or create the ``Unit`` / ``DataParameter`` rows each one needs, and finally
-create the connection-level ``FTPVariableMapping`` rows.
+create the mapping rows themselves — by default the connection-level
+``FTPVariableMapping``, but any model of the same shape (see
+``create_variable_mappings``).
 
 Everything here is plain Python over the ORM so the view stays thin and the
 behaviour is unit-testable without HTTP.
@@ -200,9 +202,9 @@ def get_or_create_parameter(variable, unit):
     return parameter, True
 
 
-def create_variable_mappings(connection, rows):
+def create_variable_mappings(connection, rows, mapping_model=None, connection_field="network_ftp"):
     """
-    Create connection-level ``FTPVariableMapping`` rows.
+    Create variable-mapping rows owned by ``connection``.
 
     ``rows`` is a list of dicts::
 
@@ -212,10 +214,21 @@ def create_variable_mappings(connection, rows):
             "adl_parameter": <DataParameter or None -> create from label/adl_unit>,
         }
 
-    Runs in one transaction. Variables already mapped on the connection are
-    skipped, so re-running is safe. Returns a summary dict.
+    Defaults to the FTP plugin's connection-level ``FTPVariableMapping``. A
+    consumer with its own mapping model — another plugin, or this plugin's
+    per-station mappings — passes ``mapping_model`` and the name of the field
+    pointing back at ``connection``; the model needs the same three fields
+    (``adl_parameter``, ``file_variable_name``, ``file_variable_unit``) and
+    ``Orderable``'s ``sort_order``.
+
+    Runs in one transaction. Variables already mapped on that model for this
+    owner are skipped, so re-running is safe. Returns a summary dict.
     """
-    from .models import FTPVariableMapping
+    if mapping_model is None:
+        from .models import FTPVariableMapping
+        mapping_model = FTPVariableMapping
+
+    owned = mapping_model.objects.filter(**{connection_field: connection})
 
     summary = {
         "created": 0,
@@ -225,14 +238,8 @@ def create_variable_mappings(connection, rows):
     }
 
     with transaction.atomic():
-        existing_names = set(
-            FTPVariableMapping.objects.filter(network_ftp=connection)
-            .values_list("file_variable_name", flat=True)
-        )
-        next_order = (
-            FTPVariableMapping.objects.filter(network_ftp=connection)
-            .aggregate(m=Max("sort_order"))["m"]
-        )
+        existing_names = set(owned.values_list("file_variable_name", flat=True))
+        next_order = owned.aggregate(m=Max("sort_order"))["m"]
         next_order = 0 if next_order is None else next_order + 1
 
         for row in rows:
@@ -257,8 +264,8 @@ def create_variable_mappings(connection, rows):
                 if created:
                     summary["parameters_created"].append(parameter.name)
 
-            FTPVariableMapping.objects.create(
-                network_ftp=connection,
+            mapping_model.objects.create(
+                **{connection_field: connection},
                 adl_parameter=parameter,
                 file_variable_name=name,
                 file_variable_unit=file_unit,

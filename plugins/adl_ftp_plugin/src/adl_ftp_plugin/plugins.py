@@ -7,16 +7,10 @@ from adl.core.registries import Plugin
 from celery.exceptions import SoftTimeLimitExceeded
 from django.utils import timezone as dj_timezone
 
-try:
-    # ADL >= 0.8.12: yielded between records to have core persist what is
-    # buffered before the generator is resumed. On an older core the marker
-    # does not exist and files are stamped without that guarantee.
-    from adl.core.registries import FLUSH
-except ImportError:  # pragma: no cover - older core
-    FLUSH = None
-
 from adl_ftp_plugin.date_formats import get_format_definition
+from .decoder_resolution import resolve_decoder_for_connection
 from .models import FTPStationDataFile, FTPListingStrategy
+from .processing import add_values_saved, decode_and_stamp
 from .registries import ftp_decoder_registry
 from .utils import (
     normalize_path,
@@ -38,24 +32,15 @@ class AdlFtpPlugin(Plugin):
 
     def _get_configured_decoder(self, network_conn_ftp):
         """
-        Get and configure the decoder for the given network connection.
-        Returns None if decoder is not found or misconfigured.
+        The connection's decoder, bound to the configuration that connection
+        wants it to use. Returns None if the decoder is not found or is
+        missing the configuration it needs.
+
+        The binding matters: the registry holds one decoder instance for the
+        whole process, so a config written onto it would be read by whichever
+        station link decodes next.
         """
-        logger = self.get_logger()
-        decoder_name = network_conn_ftp.decoder
-        decoder = self.get_decoder(decoder_name)
-
-        if not decoder:
-            logger.error(f"Decoder {decoder_name} not found in decoder registry.")
-            return None
-
-        if decoder_name == "standard_csv":
-            if not network_conn_ftp.csv_config:
-                logger.error(f"Standard CSV decoder selected but no CSV configuration set.")
-                return None
-            decoder._config = network_conn_ftp.csv_config
-
-        return decoder
+        return resolve_decoder_for_connection(network_conn_ftp, task_logger=self.get_logger())
 
     def get_default_start_date(self, station_link):
         start_date = dj_timezone.localtime(dj_timezone.now(), timezone=station_link.timezone)
@@ -314,26 +299,21 @@ class AdlFtpPlugin(Plugin):
         """
         Per-file bookkeeping for :meth:`_process_file`.
 
-        Core calls this after each chunk it upserts. ``_process_file`` zeroes
-        the counter on the station link before yielding a file's records and
-        reads it back once core has consumed the trailing ``FLUSH``, so the
+        Core calls this after each chunk it upserts; the count goes to whichever
+        file's window is open (see :mod:`adl_ftp_plugin.processing`), so the
         number stamped on the file is the observation values that actually
         reached the database — not the records the decoder produced.
         """
-        if hasattr(station_link, "_adl_ftp_values_saved"):
-            station_link._adl_ftp_values_saved += len(saved_records)
+        add_values_saved(station_link, len(saved_records))
 
     def _process_file(self, station_link, path, file_name, decoder, ftp_client):
         """
         Generator that processes a single FTP file and yields its records.
 
-        Downloads the file if needed, decodes it, yields each record, then
-        yields core's ``FLUSH`` marker so the records are persisted before this
-        generator is resumed. Only after that is the file stamped
-        ``processed_at`` — "processed" means its data is in the database, not
-        merely that it decoded — along with ``values_saved``, the number of
-        observation values core reported upserting for it (see
-        :meth:`after_save_records`).
+        Two jobs, one after the other: get the file onto local disk (the FTP
+        half), then decode it, yield its records and stamp it once core has
+        persisted them (the half that is the same wherever the file came from,
+        so it lives in :mod:`adl_ftp_plugin.processing`).
 
         A file whose download or decode fails is left unstamped, so it shows as
         "Downloaded, not processed" (or not downloaded) and is retried next run.
@@ -347,6 +327,26 @@ class AdlFtpPlugin(Plugin):
         """
         logger = self.get_logger()
 
+        db_data_file = self._fetch_file(station_link, path, file_name, ftp_client)
+
+        if not db_data_file or not db_data_file.file:
+            return False
+
+        yield from decode_and_stamp(db_data_file, decoder, station_link, task_logger=logger)
+
+        return True
+
+    def _fetch_file(self, station_link, path, file_name, ftp_client):
+        """
+        The staged file for ``file_name``, downloading it unless it is already
+        held and re-downloading is switched off.
+
+        Returns the :class:`~adl_ftp_plugin.models.FTPStationDataFile`, or
+        ``None`` when the file could not be fetched — which for DIRECT_FETCH
+        usually just means the source does not have it yet.
+        """
+        logger = self.get_logger()
+
         # Check if file exists in database
         db_data_file = FTPStationDataFile.objects.filter(
             station_link=station_link,
@@ -356,88 +356,50 @@ class AdlFtpPlugin(Plugin):
         # Download if new file OR re-download is enabled
         needs_download = not db_data_file or not station_link.skip_already_downloaded_files
 
-        if needs_download:
-            remote_file_path = normalize_path(f"{path}/{file_name}")
-
-            with tempfile.NamedTemporaryFile(suffix=file_name, delete=False) as temp_file:
-                temp_path = temp_file.name
-
-                try:
-                    logger.debug(f"Downloading file {file_name}..")
-                    ftp_client.get(remote_file_path, temp_path)
-
-                    # Create OR update existing record
-                    if not db_data_file:
-                        db_data_file = FTPStationDataFile(
-                            station_link=station_link,
-                            file_name=file_name,
-                        )
-
-                    with open(temp_path, 'rb') as f:
-                        db_data_file.file.save(file_name, f)
-
-                except SoftTimeLimitExceeded:
-                    # It is the batch's time budget that ran out, not this file.
-                    # Swallowed here (it is an Exception subclass) the run would
-                    # roll on to the hard kill; propagated, core persists what
-                    # earlier files yielded and records the timeout honestly.
-                    raise
-                except Exception as e:
-                    # For direct fetch, missing files are expected — log at debug level
-                    if station_link.listing_strategy == FTPListingStrategy.DIRECT_FETCH:
-                        logger.debug(f"File {file_name} not found on server (expected for direct fetch), skipping.")
-                    else:
-                        logger.error(f"Error downloading file {file_name}: {e}")
-                    return False
-
-                finally:
-                    try:
-                        os.unlink(temp_path)
-                    except OSError:
-                        pass
-        else:
+        if not needs_download:
             logger.debug(f"File {file_name} already downloaded, skipping download")
+            return db_data_file
 
-        if not db_data_file or not db_data_file.file:
-            return False
+        remote_file_path = normalize_path(f"{path}/{file_name}")
 
-        # Decode (always, whether freshly downloaded or existing)
-        try:
-            data = decoder.decode(db_data_file.file.path)
-            file_records = data.get("values", [])
-        except Exception as e:
-            logger.error(f"Error decoding file {file_name}: {e}")
-            return True
+        with tempfile.NamedTemporaryFile(suffix=file_name, delete=False) as temp_file:
+            temp_path = temp_file.name
 
-        logger.debug(f"Decoded {len(file_records)} records from {file_name}")
+            try:
+                logger.debug(f"Downloading file {file_name}..")
+                ftp_client.get(remote_file_path, temp_path)
 
-        # after_save_records adds to this as core upserts the chunks
-        station_link._adl_ftp_values_saved = 0
+                # Create OR update existing record
+                if not db_data_file:
+                    db_data_file = FTPStationDataFile(
+                        station_link=station_link,
+                        file_name=file_name,
+                    )
 
-        for record in file_records:
-            yield record
+                with open(temp_path, 'rb') as f:
+                    db_data_file.file.save(file_name, f)
 
-        if FLUSH is not None:
-            # Resumes only once core has persisted this file's records
-            yield FLUSH
-            values_saved = station_link._adl_ftp_values_saved
-        else:
-            # Older core: chunks may span files, so the per-file count would
-            # be attributed to whichever file happens to be current — leave
-            # it unrecorded rather than record something misleading
-            values_saved = None
+            except SoftTimeLimitExceeded:
+                # It is the batch's time budget that ran out, not this file.
+                # Swallowed here (it is an Exception subclass) the run would
+                # roll on to the hard kill; propagated, core persists what
+                # earlier files yielded and records the timeout honestly.
+                raise
+            except Exception as e:
+                # For direct fetch, missing files are expected — log at debug level
+                if station_link.listing_strategy == FTPListingStrategy.DIRECT_FETCH:
+                    logger.debug(f"File {file_name} not found on server (expected for direct fetch), skipping.")
+                else:
+                    logger.error(f"Error downloading file {file_name}: {e}")
+                return None
 
-        db_data_file.processed_at = dj_timezone.now()
-        db_data_file.values_saved = values_saved
-        db_data_file.save(update_fields=['processed_at', 'values_saved'])
+            finally:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
 
-        if values_saved == 0:
-            logger.warning(
-                f"File {file_name} decoded {len(file_records)} record(s) but none of its "
-                f"values were saved — check the variable mappings and the ingestion window"
-            )
-
-        return True
+        return db_data_file
 
     def get_station_file_paths(self, station_link, start_date=None, end_date=None) -> list:
         """

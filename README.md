@@ -134,6 +134,28 @@ The plugin provides a few inbuilt decoders for different data formats. These inc
 
 You can also create your own decoder and use it with the plugin.
 
+#### Decoder configuration
+
+Some decoders cannot decode a file without knowing how it is laid out — the standard CSV decoder needs the delimiter,
+the datetime column and so on, which is what the connection's *CSV Configuration* holds. A decoder asks for that
+configuration by setting `requires_config` and taking a `config` argument:
+
+```python
+class MyDecoder(FTPDecoder):
+    type = "my_decoder"
+    requires_config = True
+
+    def decode(self, file_path, config=None):
+        ...
+```
+
+The configuration is passed per call, never assigned to the decoder: the registry holds one decoder instance for the
+whole process, so a configuration written onto it would be read by whichever connection decodes next. Resolve a
+decoder with `adl_ftp_plugin.decoder_resolution.resolve_decoder_for_connection(connection)`, which returns the decoder
+bound to that connection's configuration (or `None` when a decoder that needs one has none set).
+
+A decoder that needs no configuration keeps the plain `decode(self, file_path)` signature — it is never handed one.
+
 #### Declaring decoder variables
 
 A decoder can declare the variables it emits by overriding `get_variables()` on the `FTPDecoder` subclass. Each entry

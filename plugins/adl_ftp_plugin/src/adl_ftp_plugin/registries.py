@@ -14,6 +14,14 @@ class FTPDecoder(Instance):
     type = ""
     compat_type = ""
 
+    requires_config = False
+    """
+    Set by decoders that cannot decode without the connection's
+    ``csv_config``. Resolution refuses such a decoder when the connection has
+    none, and hands the config to :meth:`decode` (see
+    ``adl_ftp_plugin.decoder_resolution``).
+    """
+
     def __init__(self):
         if not self.type:
             raise ImproperlyConfigured("The type of an instance must be set.")
@@ -27,12 +35,18 @@ class FTPDecoder(Instance):
         """
         return file_path
 
-    def decode(self, file_path):
+    def decode(self, file_path, config=None):
         """
         Decodes the given file and returns the result.
 
+        ``config`` is the configuration the caller wants this decode to use —
+        only decoders setting :attr:`requires_config` are handed one, and a
+        decoder that ignores it may leave the argument off its signature
+        entirely.
+
         :param file_path: The data that should be decoded.
         :type file_path: str
+        :param config: Configuration for this decode, or ``None``.
         :return: The decoded data.
         :rtype: list[dict]
         """

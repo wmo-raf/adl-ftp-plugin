@@ -24,6 +24,7 @@ from wagtail.admin.paginator import WagtailPaginator
 from wagtail.permission_policies import ModelPermissionPolicy
 from wagtail.admin import messages
 
+from .decoder_resolution import resolve_decoder_for_connection
 from .decoder_variables import (
     create_variable_mappings,
     find_parameter_for_variable,
@@ -112,16 +113,16 @@ def test_decoder_config(request):
                             temp_file.write(chunk)
                         temp_file_path = temp_file.name
 
-                    # Set CSV config if using standard_csv decoder
-                    if decoder_name == "standard_csv":
-                        if not connection.csv_config:
-                            error = "Standard CSV decoder selected but no CSV configuration set"
-                        else:
-                            decoder._config = connection.csv_config
+                    # Bind the decoder to this connection's configuration —
+                    # the same resolution ingestion runs use, so what the page
+                    # shows is what a run would decode
+                    configured = resolve_decoder_for_connection(connection)
 
-                    if not error:
+                    if configured is None:
+                        error = f"Decoder '{decoder_name}' selected but no CSV configuration set"
+                    else:
                         # Parse the file
-                        parsed_result = decoder.decode(temp_file_path)
+                        parsed_result = configured.decode(temp_file_path)
 
                         # Get variable mappings
                         variable_mappings = connection.variable_mappings.all().select_related(
