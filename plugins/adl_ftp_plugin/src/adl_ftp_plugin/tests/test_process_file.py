@@ -177,10 +177,6 @@ class EndToEndThroughCoreTests(ProcessFileTestCase):
             source_parameter_name="air_temperature_2m", source_parameter_unit=unit_c,
         )
         self.link.get_variable_mappings = lambda: [mapping]
-        self.window = (
-            datetime(2026, 8, 17, 0, 0, tzinfo=UTC),
-            datetime(2026, 8, 17, 23, 59, tzinfo=UTC),
-        )
 
     def test_stamp_matches_persisted_rows_file_by_file(self):
         client = FakeClient()
@@ -191,7 +187,7 @@ class EndToEndThroughCoreTests(ProcessFileTestCase):
             second = dict(self.record, observation_time=datetime(2026, 8, 17, 3, 47, tzinfo=UTC))
             yield from self.process(client, FakeDecoder([second]), "KMD_001_202608170347.csv")
 
-        total, _, _ = self.plugin.save_records(self.link, source(), *self.window)
+        total, _, _ = self.plugin.save_records(self.link, source())
 
         self.assertEqual(total, 2)
         self.assertEqual(ObservationRecord.objects.count(), 2)
@@ -210,7 +206,7 @@ class EndToEndThroughCoreTests(ProcessFileTestCase):
             yield from self.process(bad, FakeDecoder([self.record]), "KMD_001_202608170346.csv")
 
         with self.assertRaises(SoftTimeLimitExceeded):
-            self.plugin.save_records(self.link, source(), *self.window)
+            self.plugin.save_records(self.link, source())
 
         self.assertEqual(ObservationRecord.objects.count(), 1)
         self.assertEqual(self.db_file("KMD_001_202608170345.csv").values_saved, 1)
