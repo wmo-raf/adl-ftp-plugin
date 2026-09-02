@@ -1,0 +1,53 @@
+# Screenshot manifest for the ADL FTP Plugin guide (docs/guide.md).
+# Regenerate with the core harness, from the adl repo:
+#   scripts/capture-plugin-docs.sh ../adl-plugins/adl-ftp-plugin
+# Fixture: docs/screenshots/fixture.json (connection 1 = "Demo FTP (mock source)",
+# station links 1..3 = Pattern Only / Filter by Date / Direct Fetch).
+# Format: defaults + screenshots (name/url/setup/callouts/capture), run by adl's
+# docs/screenshots/capture/capture.py; output derives from name: docs/images/<name>.png.
+
+defaults:
+  viewport:
+  - 1440
+  - 900
+  padding: 12
+screenshots:
+- name: ftp_connection_form
+  url: /networkftp/edit/1/
+  setup:
+  - fill: { selector: '#id_password', value: '••••••••••••' }
+  capture:
+    selector: "#w-editor-form"
+- name: ftp_station_link_form
+  url: /ftpstationlink/edit/1/
+  capture:
+    selector: "#w-editor-form"
+- name: ftp_connection_row_actions
+  url: /connections/
+  setup:
+  - click: button[aria-label^="More options"]
+  - wait_for: .w-dropdown__content a[href*="test-decoder"]
+  callouts:
+  - highlight: .w-dropdown__content a[href*="test-decoder"]
+  capture:
+    selector: main
+- name: ftp_ingestion_diagnostic
+  url: /monitoring/connection/1/health/
+  callouts:
+  - highlight: .health-probe-form button
+  capture:
+    selector: .health-diagnostic
+- name: ftp_station_source_check
+  url: /ftpstationlink/inspect/1/
+  capture:
+    selector: .collection-status
+- name: ftp_direct_fetch_files
+  url: /adl-ftp-plugin/station-links/3/direct-fetch-files/
+  capture:
+    selector: main
+- name: ftp_dashboard_data_pulling
+  url: /
+  setup:
+  - wait: 5000
+  capture:
+    selector: .adl-monitoring-tabs
