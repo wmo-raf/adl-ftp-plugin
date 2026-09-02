@@ -3,8 +3,12 @@
     "connection": "Demo FTP (mock source)",
     "ingest": true,
     "probe": true,
-    "station_checks": ["DEMO001", "DEMO003"],
-    "wait": 240
+    "station_checks": [
+      "DEMO001",
+      "DEMO003"
+    ],
+    "wait": 240,
+    "present_interval": 15
   },
   "connection": {
     "model": "adl_ftp_plugin.NetworkFTP",
@@ -24,13 +28,41 @@
     },
     "children": {
       "variable_mappings": [
-        {"adl_parameter": "Air Temperature", "file_variable_name": "AirTC_Avg", "file_variable_unit": "degC"},
-        {"adl_parameter": "Relative Humidity", "file_variable_name": "RH", "file_variable_unit": "percent"},
-        {"adl_parameter": "Atmospheric Pressure", "file_variable_name": "BP_hPa_Avg", "file_variable_unit": "hPa"},
-        {"adl_parameter": "Precipitation", "file_variable_name": "Rain_mm_Tot", "file_variable_unit": "mm"},
-        {"adl_parameter": "Wind Speed", "file_variable_name": "WS_ms_Avg", "file_variable_unit": "m/s"},
-        {"adl_parameter": "Wind Direction", "file_variable_name": "WindDir", "file_variable_unit": "degree"},
-        {"adl_parameter": "Solar Radiation", "file_variable_name": "SlrW_Avg", "file_variable_unit": "W/m^2"}
+        {
+          "adl_parameter": "Air Temperature",
+          "file_variable_name": "AirTC_Avg",
+          "file_variable_unit": "degC"
+        },
+        {
+          "adl_parameter": "Relative Humidity",
+          "file_variable_name": "RH",
+          "file_variable_unit": "percent"
+        },
+        {
+          "adl_parameter": "Atmospheric Pressure",
+          "file_variable_name": "BP_hPa_Avg",
+          "file_variable_unit": "hPa"
+        },
+        {
+          "adl_parameter": "Precipitation",
+          "file_variable_name": "Rain_mm_Tot",
+          "file_variable_unit": "mm"
+        },
+        {
+          "adl_parameter": "Wind Speed",
+          "file_variable_name": "WS_ms_Avg",
+          "file_variable_unit": "m/s"
+        },
+        {
+          "adl_parameter": "Wind Direction",
+          "file_variable_name": "WindDir",
+          "file_variable_unit": "degree"
+        },
+        {
+          "adl_parameter": "Solar Radiation",
+          "file_variable_name": "SlrW_Avg",
+          "file_variable_unit": "W/m^2"
+        }
       ]
     }
   },
