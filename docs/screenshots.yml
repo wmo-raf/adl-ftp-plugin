@@ -2,9 +2,21 @@
 # Regenerate with the core harness, from the adl repo:
 #   scripts/capture-plugin-docs.sh ../adl-plugins/adl-ftp-plugin
 # Fixture: docs/screenshots/fixture.json (connection 1 = "Demo FTP (mock source)",
-# station links 1..3 = Pattern Only / Filter by Date / Direct Fetch).
+# station links 1..3 = Pattern Only / Filter by Date (date-structured tree) /
+# Direct Fetch), all against the harness's mock FTP source (docs/screenshots/capture
+# README in adl: mock-ftp/, user demo/demo, TOA5 samples for DEMO001..003).
 # Format: defaults + screenshots (name/url/setup/callouts/capture), run by adl's
 # docs/screenshots/capture/capture.py; output derives from name: docs/images/<name>.png.
+# Callouts are numbered badges/outlines only — never text in images.
+#
+# Every entry below has been run against the stack this file describes; URLs and
+# selectors are verified, not guessed. Two entries need no seeded row:
+#   - ftp_upload_form / ftp_smartmet_upload_form capture the *add* forms of the two
+#     dispatch channel types. Verified against the live admin: Dispatch Channels ->
+#     add -> /dispatch-channels/select/ links to exactly /ftpupload/new/ and
+#     /smartmetftpupload/new/, which is what these entries open.
+#   - ftp_test_decoder_config_results uploads docs/screenshots/sample_toa5.dat (in this
+#     repo) through the form; the mock source's own TOA5 files would do as well.
 
 defaults:
   viewport:
@@ -12,25 +24,230 @@ defaults:
   - 900
   padding: 12
 screenshots:
+# --- Connection ------------------------------------------------------------
 - name: ftp_connection_form
   url: /networkftp/edit/1/
   setup:
   - fill: { selector: '#id_password', value: '••••••••••••' }
   capture:
     selector: "#w-editor-form"
-- name: ftp_station_link_form
-  url: /ftpstationlink/edit/1/
+- name: ftp_connection_sftp_settings
+  # The radio switches the JS-toggled panels; SFTP Settings is hidden until
+  # "sftp" is checked. Nothing is saved — the page is captured, not submitted.
+  url: /networkftp/edit/1/
+  setup:
+  - fill: { selector: '#id_password', value: '••••••••••••' }
+  - click: 'input[name="connection_type"][value="sftp"]'
+  - wait_for: '#panel-sftp_settings-section'
+  callouts:
+  - badge: { target: '#id_private_key_file', n: 1 }
+  - badge: { target: '#id_host_key_policy', n: 2 }
+  - badge: { target: '#id_look_for_keys', n: 3 }
+  - badge: { target: '#id_allow_agent', n: 4 }
   capture:
-    selector: "#w-editor-form"
+    selector: '#panel-sftp_settings-section'
+- name: ftp_decoder_select
+  url: /networkftp/edit/1/
+  callouts:
+  - highlight: '#id_decoder'
+  capture:
+    selector: '#panel-decoder-section'
+- name: ftp_variable_mappings
+  url: /networkftp/edit/1/
+  capture:
+    # the whole panel, header included (#id_variable_mappings-FORMS starts below it)
+    selector: '#panel-variable_mappings-section'
 - name: ftp_connection_row_actions
   url: /connections/
   setup:
   - click: button[aria-label^="More options"]
   - wait_for: .w-dropdown__content a[href*="test-decoder"]
+  # last, so it runs after the steps above have settled the layout
+  - eval: "fitMain()"
   callouts:
   - highlight: .w-dropdown__content a[href*="test-decoder"]
   capture:
     selector: main
+
+# --- Station link ----------------------------------------------------------
+- name: ftp_station_link_form
+  url: /ftpstationlink/edit/1/
+  capture:
+    selector: "#w-editor-form"
+- name: ftp_station_link_remote_path_tree
+  # The Vue tree (vue3-treeselect) mounts into #id_ftp_path-tree. Closed, the
+  # field looks like a plain select, so the menu is opened and two levels are
+  # expanded — root "/" then "/data" — which is the tree the guide describes.
+  url: /ftpstationlink/edit/1/
+  setup:
+  - click: '.vue-treeselect__control'
+  - wait_for: '.vue-treeselect__menu'
+  - click: ':nth-match(.vue-treeselect__option-arrow-container, 1)'
+  - wait_until: "document.querySelectorAll('.vue-treeselect__option').length > 1"
+  - click: ':nth-match(.vue-treeselect__option-arrow-container, 2)'
+  - wait_until: "document.querySelectorAll('.vue-treeselect__option').length > 2"
+  capture:
+    selector: '#panel-remote_configuration-section'
+    # the open menu is absolutely positioned and overhangs the panel's own box
+    # by a few pixels; the extra padding keeps its last row in the crop
+    padding: 40
+- name: ftp_station_link_directory_structure
+  # Link 2 has the date-structured tree on, so granularity and month format are
+  # visible.
+  url: /ftpstationlink/edit/2/
+  callouts:
+  - badge: { target: '#id_dir_structured_by_date', n: 1 }
+  - badge: { target: '#id_date_granularity', n: 2 }
+  - badge: { target: '#id_month_dir_format', n: 3 }
+  capture:
+    selector: '#panel-directory_structure-section'
+- name: ftp_station_link_filter_by_date
+  # Link 2 uses Filter by Date, so the panel is shown.
+  url: /ftpstationlink/edit/2/
+  callouts:
+  - badge: { target: '#id_listing_strategy', n: 1 }
+  - badge: { target: '#id_filename_date_format', n: 2 }
+  - badge: { target: '#id_filename_date_timezone', n: 3 }
+  capture:
+    # from the strategy select down to the end of the Filter by Date panel: the
+    # two panels are siblings, so the crop is the strategy panel's parent form
+    # section; fall back to '#panel-filter_by_date-section' if that grows too tall
+    selector: '#panel-file_listing_strategy-section'
+- name: ftp_station_link_direct_fetch
+  # Link 3 uses Direct Fetch, so the panel is shown and File Pattern is hidden.
+  url: /ftpstationlink/edit/3/
+  callouts:
+  - badge: { target: '#id_direct_fetch_prefix', n: 1 }
+  - badge: { target: '#id_direct_fetch_datetime_format', n: 2 }
+  - badge: { target: '#id_direct_fetch_interval_minutes', n: 3 }
+  - badge: { target: '#id_direct_fetch_datetime_timezone', n: 4 }
+  - badge: { target: '#id_direct_fetch_file_extension', n: 5 }
+  capture:
+    selector: '#panel-direct_fetch-section'
+- name: ftp_station_link_row_actions
+  # "Direct Fetch Files" is an inline action in the row's title cell, not an
+  # entry in the row's "More options" menu — that menu holds Edit/Copy/Inspect/
+  # Delete and nothing plugin-specific. It is visible without interaction, and
+  # only on the DEMO003 row, the one link whose strategy is Direct Fetch.
+  url: /ftpstationlink/
+  setup:
+  - eval: "fitMain()"
+  callouts:
+  - highlight: 'a[href*="direct-fetch-files"]'
+  capture:
+    selector: main
+
+# --- Test Decoder Configuration --------------------------------------------
+- name: ftp_test_decoder_config_form
+  # Scoped to main: the Wagtail sidebar's search box is a <form> too, and it
+  # comes first in the DOM.
+  url: /adl-ftp-plugin/test-decoder-config/?connection_id=1
+  callouts:
+  - badge: { target: '#id_connection', n: 1 }
+  - badge: { target: '#id_data_file', n: 2 }
+  - badge: { target: '#id_show_only_mapped', n: 3 }
+  capture:
+    selector: 'main form'
+- name: ftp_test_decoder_config_results
+  # Uploads the sample TOA5 file shipped in this repo and submits; the results
+  # block renders below the form. The connection is preselected by the query
+  # string, so the upload is the only field the form still needs.
+  url: /adl-ftp-plugin/test-decoder-config/?connection_id=1
+  setup:
+  - upload: { selector: '#id_data_file', path: 'docs/screenshots/sample_toa5.dat' }
+  - click: 'main form button[type="submit"]'
+  - wait_for: '.parsed-results'
+  # last, so it runs after the steps above have settled the layout
+  - eval: "fitMain()"
+  capture:
+    selector: main
+    # header, metadata, mappings and the first rows of the preview are enough;
+    # the guide says the preview continues (up to 100 rows)
+    max_height: 1800
+
+# --- CSV Decoder Configurations --------------------------------------------
+- name: ftp_csv_config_list
+  # The ModelViewSet url prefix is the model name.
+  url: /standardcsvconfig/
+  setup:
+  - eval: "fitMain()"
+  capture:
+    selector: main
+- name: ftp_csv_config_form
+  # Wagtail's generic add view is new/, not add/.
+  url: /standardcsvconfig/new/
+  callouts:
+  - badge: { target: '#id_name', n: 1 }
+  - badge: { target: '#id_has_header', n: 2 }
+  - badge: { target: '#id_delimiter', n: 3 }
+  - badge: { target: '#id_skip_rows', n: 4 }
+  - badge: { target: '#id_no_data_value', n: 5 }
+  - badge: { target: 'input[name="datetime_mode"][value="single"]', n: 6 }
+  - badge: { target: '#id_datetime_column', n: 7 }
+  - badge: { target: '#id_datetime_format', n: 8 }
+  capture:
+    selector: '#w-editor-form'
+
+# --- Direct Fetch Files ----------------------------------------------------
+- name: ftp_direct_fetch_files
+  url: /adl-ftp-plugin/station-links/3/direct-fetch-files/
+  setup:
+  - eval: "fitMain()"
+  capture:
+    selector: main
+- name: ftp_direct_fetch_files_checked
+  # Sweeps the page against the mock server so the Remote column fills; the
+  # cooldown key is per page, so this must not run twice inside a minute in the
+  # same stack.
+  url: /adl-ftp-plugin/station-links/3/direct-fetch-files/
+  setup:
+  - click: '#dff-check-page'
+  - wait_until: "document.querySelector('#dff-check-page-status') && document.querySelector('#dff-check-page-status').textContent.startsWith('Checked')"
+  # last, so it runs after the steps above have settled the layout
+  - eval: "fitMain()"
+  callouts:
+  - highlight: '#dff-check-page'
+  capture:
+    selector: main
+
+# --- Remote Station Data Files ---------------------------------------------
+- name: ftp_data_files_list
+  url: /snippets/adl_ftp_plugin/ftpstationdatafile/
+  setup:
+  - eval: "fitMain()"
+  capture:
+    selector: main
+    max_height: 960
+- name: ftp_data_file_inspect
+  url: /snippets/adl_ftp_plugin/ftpstationdatafile/inspect/1/
+  setup:
+  - eval: "fitMain()"
+  capture:
+    selector: main
+
+# --- Dispatch channels -----------------------------------------------------
+- name: ftp_upload_form
+  # The add form of the Standard FTP/SFTP Upload type, which is where
+  # /dispatch-channels/select/ sends an operator who picks it.
+  url: /ftpupload/new/
+  callouts:
+  - badge: { target: '#id_timezone', n: 1 }
+  - badge: { target: '#id_directory', n: 2 }
+  - badge: { target: '#id_write_mode', n: 3 }
+  capture:
+    selector: '#w-editor-form'
+- name: ftp_smartmet_upload_form
+  # Cropped to the metadata panel: the fields above it are the standard
+  # channel's, documented and captured there.
+  url: /smartmetftpupload/new/
+  callouts:
+  - badge: { target: '#id_update_stations_metadata_after_station_update', n: 1 }
+  - badge: { target: '#id_stations_csv_ftp_path', n: 2 }
+  - badge: { target: '#id_stations_file_name', n: 3 }
+  capture:
+    selector: '#panel-stations_metadata_csv_configuration-section'
+
+# --- Core-rendered screens showing this plugin's output --------------------
 - name: ftp_ingestion_diagnostic
   url: /monitoring/connection/1/health/
   callouts:
@@ -40,11 +257,7 @@ screenshots:
 - name: ftp_station_source_check
   url: /ftpstationlink/inspect/1/
   capture:
-    selector: .collection-status
-- name: ftp_direct_fetch_files
-  url: /adl-ftp-plugin/station-links/3/direct-fetch-files/
-  capture:
-    selector: main
+    selector: ":nth-match(.collection-status, 2)"
 - name: ftp_dashboard_data_pulling
   url: /
   setup:
