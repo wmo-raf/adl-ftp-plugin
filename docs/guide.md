@@ -900,7 +900,8 @@ Collection Status card) for a run that connected but stored nothing:
 
 | Plugin version | Requires ADL core | Notes |
 |---|---|---|
-| 0.13.0 | ≥ 0.8.12 for *Values Saved*, the per-file processed stamp and the source checks (runs on older cores with those features inactive) | Current release. Decoder plugins must accept the dated `get_matching_files()` signature introduced in 0.10.0. |
+| 0.14.0 | The core release that ships the availability check (after 0.8.19); runs on older cores with the availability check inactive. Otherwise as 0.13.0 | Current release. Adds the file-listing availability check. |
+| 0.13.0 | ≥ 0.8.12 for *Values Saved*, the per-file processed stamp and the source checks (runs on older cores with those features inactive) | Decoder plugins must accept the dated `get_matching_files()` signature introduced in 0.10.0. |
 | 0.10.0 – 0.12.x | 0.8.x | Dated decoder API; earlier decoder plugins fail with a `TypeError`. |
 
 ## Changelog
