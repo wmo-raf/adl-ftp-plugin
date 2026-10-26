@@ -940,6 +940,25 @@ class FTPStationLink(StationLink):
         finally:
             client.close()
 
+    @property
+    def availability_check_supported(self):
+        """Decided from ``listing_strategy`` alone, with no I/O: filenames
+        that encode time can be answered from a listing, ``PATTERN_ONLY``
+        cannot."""
+        if not self.network_connection.has_external_source:
+            return False
+        from .availability import availability_check_supported
+        return availability_check_supported(self)
+
+    def check_availability(self, start, end):
+        """
+        Does the server have files for ``[start, end)``? Answered from a stat
+        (``DIRECT_FETCH``) or a directory listing (``FILTER_BY_DATE``), never
+        a download; ``PATTERN_ONLY`` returns ``UNSUPPORTED``.
+        """
+        from .availability import check_availability
+        return check_availability(self, start, end)
+
 
 class FTPStationLinkVariableMapping(Orderable):
     station_link = ParentalKey(FTPStationLink, on_delete=models.CASCADE, related_name="variable_mappings")

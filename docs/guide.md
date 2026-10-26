@@ -787,6 +787,7 @@ processing interval — the quickest way to see that files are flowing.
 | Endpoint probe | DNS resolution and TCP reach of *Host* and the effective *Port* (the entered port, or 21/22). Run by the core; the plugin only names the endpoint. |
 | Connection check | Connects and logs in with the configured protocol and credentials, then disconnects. Nothing is listed or downloaded. Bounded to 5 seconds so the diagnostic always gets an answer. |
 | Station check | Resolves the station's remote directory *for right now* (the current period's directory when structured by date), changes into it, lists it read-only, and counts the names matching the station's pattern (for Direct Fetch, `<prefix>*<extension>`). **Zero matches is OK** — a date-structured directory is legitimately empty just after a rollover — the count is there for you to judge. |
+| Availability check | Asked from the Monitoring → *Data availability* day view: does the server have files for a gap window? Answered without downloading anything. **Direct Fetch** links stat each file the window would expect (one existence call per file, no transfer). **Filter by Date** links list the window's directories and keep the files whose filename date (in *Filename Date Timezone*) falls in the window; a daily file counts as covering its whole day. **Pattern Only** links cannot answer this way — their filenames carry no time — so ADL fetches and parses the window instead, which takes longer. "Files exist" is not "records exist": a file may be empty or cover less than its name implies, and recovery reports what actually saved. Bounded to 10 seconds. |
 
 ### Feedback catalogue — messages this plugin produces
 
@@ -813,6 +814,9 @@ channel's *Test connection*.
 | `SSH host key verification failed` | FAILED | *Host Key Policy* is *Reject* (or the host's key changed) and the key is not trusted. | Use *Auto-accept* or *Warn*, or provision the server's key in the container's `known_hosts`. |
 | `SSH error: <detail>` / `SFTP channel error: <detail>` | FAILED | Any other SSH-level failure; the detail is paramiko's message (a banner timeout, an unsupported key type, an account without SFTP access). | Read the detail; ask the server operator whether the account has SFTP enabled. |
 | `Failed to list directory /data: <detail>` | FAILED | SFTP: the directory exists but could not be listed. | Check permissions on the directory. |
+| `Looked for 24 file(s) in /data/DEMO003: 3 found.` | OK | Availability check on a Direct Fetch link: how many of the window's expected files exist on the server. | If 0 are found but data should be there, check prefix, extension, interval and *File Datetime Timezone* with the *Direct Fetch Files* checks. |
+| `Listed /data/DEMO001: 1 file(s) matching 'DEMO001_*.csv' fall in the window.` | OK | Availability check on a Filter by Date link: the files in the listing whose filename date falls in the window. A trailing `Not found on the server: …` names date directories that do not exist yet. | If 0, compare *Filename Date Format* and *Filename Date Timezone* with a real listing. |
+| `Stopped after checking 40 of 144 files within the time limit. Try by fetching data instead.` | FAILED | Availability check on a Direct Fetch link: the window has more files than can be checked in 10 seconds. | Use *Try by fetching data*, or check a shorter run of hours. |
 | `Directory /data/DEMO001 does not exist` | FAILED | SFTP: the resolved path is absent. | As for *was not found on the server*. |
 | `Connecting to the server took too long.` | FAILED | *Direct Fetch Files* → *Check page*: the connect did not complete inside the sweep's budget. | Run *Probe source now* on the connection; the diagnostic names the layer. |
 | `That path is not one this station link would generate.` | FAILED | *Direct Fetch Files* → *Check*: the path posted does not fit the link's prefix, extension and format (a stale page after editing the link). | Reload the page. |
@@ -896,7 +900,8 @@ Collection Status card) for a run that connected but stored nothing:
 
 | Plugin version | Requires ADL core | Notes |
 |---|---|---|
-| 0.13.0 | ≥ 0.8.12 for *Values Saved*, the per-file processed stamp and the source checks (runs on older cores with those features inactive) | Current release. Decoder plugins must accept the dated `get_matching_files()` signature introduced in 0.10.0. |
+| 0.14.0 | The core release that ships the availability check (after 0.8.19); runs on older cores with the availability check inactive. Otherwise as 0.13.0 | Current release. Adds the file-listing availability check. |
+| 0.13.0 | ≥ 0.8.12 for *Values Saved*, the per-file processed stamp and the source checks (runs on older cores with those features inactive) | Decoder plugins must accept the dated `get_matching_files()` signature introduced in 0.10.0. |
 | 0.10.0 – 0.12.x | 0.8.x | Dated decoder API; earlier decoder plugins fail with a `TypeError`. |
 
 ## Changelog
