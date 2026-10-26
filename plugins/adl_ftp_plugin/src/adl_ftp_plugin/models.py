@@ -940,7 +940,6 @@ class FTPStationLink(StationLink):
         finally:
             client.close()
 
-
     @property
     def availability_check_supported(self):
         """Decided from ``listing_strategy`` alone, with no I/O: filenames

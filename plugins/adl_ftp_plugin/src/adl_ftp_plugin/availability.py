@@ -95,11 +95,13 @@ def _check_direct_fetch(station_link, client, start, end):
 
     # The same names a recovery over this window would try. The generator
     # includes its end instant, but the window is half-open.
-    expected = [
-        (moment, filename)
-        for moment, filename in AdlFtpPlugin()._generate_direct_fetch_files(station_link, start, end)
+    # A filename format coarser than the interval repeats names; stat each once.
+    expected = list({
+        filename: (moment, filename)
+        for moment, filename in reversed(
+            AdlFtpPlugin()._generate_direct_fetch_files(station_link, start, end))
         if moment < end
-    ]
+    }.values())[::-1]
     interval = timedelta(minutes=station_link.direct_fetch_interval_minutes)
 
     deadline = time.monotonic() + TIME_BUDGET_SECONDS
@@ -195,6 +197,17 @@ def _check_filter_by_date(station_link, client, start, end):
             file_start, file_end = file_range
             if file_end > start and file_start < end:
                 ranges.append(AvailabilityRange(file_start, file_end, None, name))
+
+    if missing and len(missing) == len(directories):
+        # Nothing to list anywhere: the operator should see a path to doubt,
+        # not an empty answer (as check_station_source does).
+        return AvailabilityCheckResult(
+            status=SourceCheckStatus.FAILED,
+            category="PATH_NOT_FOUND",
+            message=gettext(
+                "Resolved remote path %(path)s was not found on the server."
+            ) % {"path": ", ".join(missing)},
+        )
 
     ranges.sort(key=lambda r: r.start)
     message = gettext(

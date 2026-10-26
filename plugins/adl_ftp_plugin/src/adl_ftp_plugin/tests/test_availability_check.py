@@ -134,6 +134,17 @@ class DirectFetchTests(SimpleTestCase):
         self.assertEqual(client.get_calls, [])
         self.assertTrue(client.closed)
 
+    def test_a_coarse_filename_format_stats_each_name_once(self):
+        link = make_station_link(**{**DIRECT_KWARGS,
+                                    "direct_fetch_datetime_format": "YYYYMMDDHH",
+                                    "direct_fetch_interval_minutes": 20})
+        client = FakeAvailabilityClient()
+        run_check(link, client, at(5, 10), at(5, 12))
+        self.assertEqual(client.stat_paths, [
+            "/data/station1/S1_2026010510.txt",
+            "/data/station1/S1_2026010511.txt",
+        ])
+
     def test_window_end_is_exclusive(self):
         link = make_station_link(**DIRECT_KWARGS)
         client = FakeAvailabilityClient(files={"/data/station1/S1_202601051100.txt"})
@@ -222,6 +233,13 @@ class FilterByDateTests(SimpleTestCase):
         self.assertEqual(len(result.ranges), 1)
         self.assertEqual(client.listed_paths, ["/data/station1/2026/01/05"])
         self.assertIn("/data/station1/2026/01/06", result.message)
+
+    def test_date_structured_tree_with_every_directory_missing_is_path_not_found(self):
+        link = make_station_link(**{**FILTER_KWARGS,
+                                    "dir_structured_by_date": True, "date_granularity": "day"})
+        result = run_check(link, FakeAvailabilityClient(dirs=set()), at(5, 20), at(6, 4))
+        self.assertEqual(result.status, SourceCheckStatus.FAILED)
+        self.assertEqual(result.category, "PATH_NOT_FOUND")
 
     def test_missing_plain_directory_is_path_not_found(self):
         link = make_station_link(**FILTER_KWARGS)
