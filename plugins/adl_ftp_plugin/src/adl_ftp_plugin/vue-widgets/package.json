@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "vite-plugin-css-injected-by-js": "^3.5.2",
-    "vue": "^3.5.17",
+    "vue": "^3.5.44",
     "vue-plugin-django-utils": "^0.1.6",
     "vue3-treeselect": "^0.1.10"
   },
