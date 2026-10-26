@@ -12,7 +12,10 @@ files.
 pip-compile --output-file=base.txt base.in
 ```
 
-We install the `base.txt` requirements into the docker image.
+`setup.py` reads `base.in` for `install_requires`, so the plugin only constrains
+its direct dependencies and the image resolves the rest to current releases.
+`base.txt` is a reference lock for development; do not make `setup.py` read it,
+or its exact pins are forced into the ADL image.
 
 ## Common Operations
 

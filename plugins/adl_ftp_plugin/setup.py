@@ -9,11 +9,15 @@ VERSION = "0.14.0"
 
 
 def get_requirements(env):
-    with open(os.path.join(REQUIREMENTS_DIR, f"{env}.txt")) as fp:
+    # The .in file, not the compiled .txt: install_requires must state what the
+    # plugin needs, not a frozen resolution of it. Exact pins of transitive
+    # packages (cryptography, sqlparse, ...) would otherwise be forced into the
+    # ADL image and hold back their security fixes.
+    with open(os.path.join(REQUIREMENTS_DIR, f"{env}.in")) as fp:
         return [
             x.strip()
             for x in fp.read().split("\n")
-            if not x.strip().startswith("#") and not x.strip().startswith("-")
+            if x.strip() and not x.strip().startswith("#") and not x.strip().startswith("-")
         ]
 
 
