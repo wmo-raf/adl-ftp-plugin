@@ -900,7 +900,8 @@ Collection Status card) for a run that connected but stored nothing:
 
 | Plugin version | Requires ADL core | Notes |
 |---|---|---|
-| 0.14.0 | ≥ 0.8.20 for the file-listing availability check (runs on older cores with it inactive). Otherwise as 0.13.0 | Current release. Adds the file-listing availability check. |
+| 0.14.1 | As 0.14.0 | Current release. Dependency refresh only: no longer pins transitive Python packages into the ADL image; rebuilt tree widget bundle (Vue 3.5.44). |
+| 0.14.0 | ≥ 0.8.20 for the file-listing availability check (runs on older cores with it inactive). Otherwise as 0.13.0 | Adds the file-listing availability check. |
 | 0.13.0 | ≥ 0.8.12 for *Values Saved*, the per-file processed stamp and the source checks (runs on older cores with those features inactive) | Decoder plugins must accept the dated `get_matching_files()` signature introduced in 0.10.0. |
 | 0.10.0 – 0.12.x | 0.8.x | Dated decoder API; earlier decoder plugins fail with a `TypeError`. |
 
