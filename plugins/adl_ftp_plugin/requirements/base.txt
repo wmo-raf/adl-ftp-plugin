@@ -4,25 +4,21 @@
 #
 #    pip-compile --output-file=base.txt base.in
 #
-asgiref==3.9.2
-    # via django
 bcrypt==5.0.0
     # via paramiko
-cffi==2.0.0
+cffi==2.1.1
     # via
     #   cryptography
     #   pynacl
-cryptography==46.0.1
+cryptography==50.0.2
     # via paramiko
-django-vue-utils==0.1.7
+django-vue-utils==0.1.8
     # via -r base.in
-invoke==2.2.0
+invoke==3.0.3
     # via paramiko
 paramiko==4.0.0
     # via -r base.in
-pycparser==2.23
+pycparser==3.12
     # via cffi
-pynacl==1.6.0
+pynacl==1.6.2
     # via paramiko
-sqlparse==0.5.3
-    # via django
