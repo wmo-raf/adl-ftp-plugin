@@ -16,7 +16,7 @@ django-vue-utils==0.1.8
     # via -r base.in
 invoke==3.0.3
     # via paramiko
-paramiko==4.0.0
+paramiko==5.0.0
     # via -r base.in
 pycparser==3.12
     # via cffi

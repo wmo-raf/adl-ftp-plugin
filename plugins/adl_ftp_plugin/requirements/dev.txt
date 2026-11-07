@@ -30,7 +30,7 @@ packaging==26.3
     # via
     #   build
     #   wheel
-paramiko==4.0.0
+paramiko==5.0.0
     # via -r base.in
 pip-tools==7.4.1
     # via -r dev.in

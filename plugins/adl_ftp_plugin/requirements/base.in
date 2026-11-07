@@ -1,2 +1,2 @@
 django-vue-utils>=0.1.7
-paramiko>=4.0.0,<5
+paramiko>=5.0.0,<6
