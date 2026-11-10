@@ -100,7 +100,8 @@ class AdlFtpPlugin(Plugin):
                 )
 
                 in_hand = yield from self._process_file(
-                    station_link, current_path, file_name, decoder, ftp_client
+                    station_link, current_path, file_name, decoder, ftp_client,
+                    start_date=start_date,
                 )
 
                 if direct_fetch:
@@ -225,7 +226,9 @@ class AdlFtpPlugin(Plugin):
             current_path = os.path.dirname(file_path)
             file_name = os.path.basename(file_path)
 
-            yield from self._process_file(station_link, current_path, file_name, decoder, ftp_client)
+            yield from self._process_file(
+                station_link, current_path, file_name, decoder, ftp_client, start_date=start_date
+            )
 
     def _generate_direct_fetch_files(self, station_link, start_date, end_date):
         """
@@ -298,7 +301,40 @@ class AdlFtpPlugin(Plugin):
         """
         add_values_saved(station_link, len(saved_records))
 
-    def _process_file(self, station_link, path, file_name, decoder, ftp_client):
+    @staticmethod
+    def _already_ingested_bound(db_data_file, start_date):
+        """
+        The exclusive lower bound for the rows of ``db_data_file`` this run
+        hands to core, or ``None`` to hand over the whole file.
+
+        A file that has never been processed is read whole. A file that has
+        been — typically a logger table that grows in place and is downloaded
+        again every run — yields only rows newer than
+        ``min(file's mark, start_date)``:
+
+        - on a routine run ``start_date`` is the station's latest saved
+          observation, about equal to the mark, so only the new rows go out;
+        - gap recovery and backfills pass an older ``start_date``, which wins,
+          so the hole is re-read from this file;
+        - a mark ahead of what was saved (rows decoded but dropped) is
+          overridden by the older ``start_date``, so those rows are retried.
+
+        A file processed before marks were recorded has none; it was ingested
+        once already, so ``start_date`` alone is the bound. Reading it whole
+        again could cost more than a run's time budget, and a run cut short
+        never stamps a mark — the file would never get one.
+        """
+        if db_data_file is None or db_data_file.processed_at is None:
+            return None
+
+        mark = db_data_file.latest_observation_time
+        if mark is None:
+            return start_date
+        if start_date is None:
+            return mark
+        return min(mark, start_date)
+
+    def _process_file(self, station_link, path, file_name, decoder, ftp_client, start_date=None):
         """
         Generator that processes a single FTP file and yields its records.
 
@@ -324,7 +360,10 @@ class AdlFtpPlugin(Plugin):
         if not db_data_file or not db_data_file.file:
             return False
 
-        yield from decode_and_stamp(db_data_file, decoder, station_link, task_logger=logger)
+        yield from decode_and_stamp(
+            db_data_file, decoder, station_link, task_logger=logger,
+            newer_than=self._already_ingested_bound(db_data_file, start_date),
+        )
 
         return True
 

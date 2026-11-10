@@ -13,9 +13,11 @@ FTP plugin already relied on: the stamp lands after core consumed the trailing
 
 import os
 import tempfile
+from datetime import datetime, timezone as dt_timezone
 from types import SimpleNamespace
 
 from adl.core.registries import FLUSH
+from celery.exceptions import SoftTimeLimitExceeded
 from django.test import SimpleTestCase
 
 from adl_ftp_plugin.processing import add_values_saved, decode_and_stamp, reset_values_saved
@@ -115,3 +117,54 @@ class DecodeAndStampTests(SimpleTestCase):
         self.assertIsNone(self.staged.processed_at)
         self.assertIsNone(self.staged.values_saved)
         self.assertEqual(self.staged.saves, [])
+
+
+class NewerThanTests(SimpleTestCase):
+    """The optional lower bound, on a staged file of the plain duck type."""
+
+    def setUp(self):
+        handle, self.path = tempfile.mkstemp(suffix=".csv")
+        os.close(handle)
+        self.addCleanup(os.unlink, self.path)
+        self.link = SimpleNamespace()
+        self.rows = [
+            {"observation_time": datetime(2026, 11, 1, h, tzinfo=dt_timezone.utc), "at": float(h)}
+            for h in range(4)
+        ]
+
+    def test_only_rows_after_the_bound_are_yielded(self):
+        staged = StagedFile(self.path)
+        yielded, _ = drain(decode_and_stamp(
+            staged, FakeDecoder(self.rows), self.link, newer_than=self.rows[1]["observation_time"],
+        ))
+        self.assertEqual(yielded, self.rows[2:] + [FLUSH])
+
+    def test_rows_without_a_usable_time_are_left_for_core_to_reject(self):
+        bad = {"observation_time": None, "at": 1.0}
+        yielded, _ = drain(decode_and_stamp(
+            StagedFile(self.path), FakeDecoder([bad] + self.rows), self.link,
+            newer_than=self.rows[3]["observation_time"],
+        ))
+        self.assertEqual(yielded, [bad, FLUSH])
+
+    def test_a_staged_file_without_a_mark_attribute_is_stamped_as_before(self):
+        staged = StagedFile(self.path)
+        drain(decode_and_stamp(staged, FakeDecoder(self.rows), self.link))
+        self.assertEqual(staged.saves, [("processed_at", "values_saved")])
+        self.assertFalse(hasattr(staged, "latest_observation_time"))
+
+    def test_a_staged_file_with_a_mark_attribute_gets_the_newest_decoded_row(self):
+        staged = StagedFile(self.path)
+        staged.latest_observation_time = None
+        drain(decode_and_stamp(
+            staged, FakeDecoder(self.rows), self.link, newer_than=self.rows[3]["observation_time"],
+        ))
+        # Computed over every decoded row, including the skipped ones
+        self.assertEqual(staged.latest_observation_time, self.rows[3]["observation_time"])
+        self.assertEqual(staged.saves, [("processed_at", "values_saved", "latest_observation_time")])
+
+    def test_the_soft_time_limit_during_decode_propagates(self):
+        staged = StagedFile(self.path)
+        with self.assertRaises(SoftTimeLimitExceeded):
+            drain(decode_and_stamp(staged, FakeDecoder(error=SoftTimeLimitExceeded()), self.link))
+        self.assertEqual(staged.saves, [])
