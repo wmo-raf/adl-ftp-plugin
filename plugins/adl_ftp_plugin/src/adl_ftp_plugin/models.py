@@ -1011,6 +1011,20 @@ class FTPStationDataFile(models.Model):
             "or ingestion-window mismatch. Empty for files processed before this was recorded."
         )
     )
+    # The file's high-water mark: the newest observation decoded from it the
+    # last time it was processed. Logger files that grow in place (Campbell
+    # TOA5 tables) are re-downloaded every run; without this, every run
+    # re-yields — and core re-upserts — the file's entire history to add one
+    # row. Stamped alongside processed_at, so it only advances once the
+    # records it covers are persisted.
+    latest_observation_time = models.DateTimeField(
+        null=True, blank=True, verbose_name=_("Latest Observation Time"),
+        help_text=_(
+            "Newest observation decoded from this file the last time it was processed. "
+            "When the file is processed again, only rows newer than this (or than the "
+            "run's start date, whichever is earlier) are handed to ADL."
+        )
+    )
 
     class Meta:
         verbose_name = _("Remote Station Data File")
