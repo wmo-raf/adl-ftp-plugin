@@ -7,10 +7,6 @@ from typing import List, Dict, Tuple, Optional
 
 import pandas as pd
 
-# Import both FTP and SFTP error types for compatibility
-from adl_ftp_plugin.ftp import FTPError
-from adl_ftp_plugin.ftp.sftp import SFTPError
-
 logger = logging.getLogger(__name__)
 
 
@@ -48,6 +44,14 @@ def build_timestamp(date_series, time_series):
         raise FTPFileError(f"Error processing timestamp: {e}")
 
 
+def parse_single_timestamp(timestamp_series):
+    """The ``YYYYMMDDTHHMMSS`` column written when ``use_single_timestamp`` is on."""
+    dt_series = pd.to_datetime(timestamp_series, format="%Y%m%dT%H%M%S", errors="coerce")
+    if dt_series.isnull().any():
+        raise FTPFileError("Error processing timestamp: invalid or missing datetime")
+    return dt_series
+
+
 def extract_values(record, keys, from_root=True):
     source = record if from_root else record.get("values", {})
     return {key: source.get(key) for key in keys}
@@ -83,10 +87,47 @@ class ObsRecord:
         return [base.get(col, "") for col in header]
 
 
-def csv_to_records(csv_content, csv_header, value_columns, timezone="UTC") -> List[ObsRecord]:
-    df = pd.read_csv(BytesIO(csv_content))
-    validate_csv_header(df.columns, csv_header)
-    df["timestamp"] = build_timestamp(df["date"].astype(str), df["time"].astype(str))
+class ColumnCountChanged(FTPFileError):
+    """A headerless file has a different number of columns than the channel
+    now writes, so its values cannot be matched to the current mappings."""
+
+
+def csv_to_records(csv_content, csv_header, value_columns, timezone="UTC",
+                   include_header=True) -> List[ObsRecord]:
+    """
+    Read a file this channel wrote earlier back into records.
+
+    A file with a header is read by column name: a value column the file
+    lacks (a mapping added since it was written) comes back empty, and one
+    the channel no longer maps is dropped. A headerless file is read by
+    position, so it must have exactly the channel's current columns.
+    Values are kept as the text in the file, so rewriting it does not
+    change them.
+
+    Raises ``FTPFileError`` when the content cannot be read as this
+    channel's output.
+    """
+    try:
+        if include_header:
+            df = pd.read_csv(BytesIO(csv_content), dtype=str, keep_default_na=False)
+        else:
+            df = pd.read_csv(BytesIO(csv_content), header=None, dtype=str, keep_default_na=False)
+            if len(df.columns) != len(csv_header):
+                raise ColumnCountChanged(
+                    f"File has {len(df.columns)} columns; the channel now writes {len(csv_header)}")
+            df.columns = csv_header
+    except pd.errors.EmptyDataError:
+        return []
+    except pd.errors.ParserError as e:
+        raise FTPFileError(f"Could not read the file as CSV: {e}")
+
+    base_columns = [col for col in csv_header if col not in value_columns]
+    validate_csv_header(df.columns, base_columns)
+
+    if "timestamp" in base_columns:
+        df["timestamp"] = parse_single_timestamp(df["timestamp"])
+    else:
+        df["timestamp"] = build_timestamp(df["date"], df["time"])
     df = df.sort_values(by=["timestamp"])
 
     return [
@@ -233,6 +274,32 @@ def prepare_csv_files_new_mode(
     return csv_files
 
 
+def read_existing_records(client, remote_path, csv_header, value_columns, timezone, include_header):
+    """
+    The rows already in the day's file, or ``None`` when there is no file yet.
+
+    Only a definite "no such file" from the server means a fresh file. A
+    failed existence check, download or parse raises, so the dispatch fails
+    and is retried instead of overwriting the file with only the new rows.
+    The one exception is a headerless file whose column count no longer
+    matches the mappings: its values cannot be placed, so the file is
+    started again, with a warning.
+    """
+    if not client.stat_file(remote_path)["exists"]:
+        logger.debug(f"[Remote Prepare] No existing file at '{remote_path}'. Creating new.")
+        return None
+
+    content = client.get(remote_path)
+    try:
+        return csv_to_records(content, csv_header, value_columns, timezone, include_header)
+    except ColumnCountChanged as e:
+        logger.warning(f"[Remote Prepare] Restarting '{remote_path}': {e}. "
+                       f"Its earlier rows cannot be matched to the current parameter mappings.")
+        return None
+    except FTPFileError as e:
+        raise FTPFileError(f"Existing file '{remote_path}' could not be read: {e}") from e
+
+
 def prepare_csv_files_append_mode(
         data_records: List[Dict],
         channel,
@@ -319,35 +386,19 @@ def prepare_csv_files_append_mode(
 
             final_records = {}
 
-            try:
-                logger.debug(f"[Remote Prepare] Checking for existing file at '{remote_path}'")
-                existing_csv = client.get(remote_path)
+            # Errors here propagate: the station's dispatch fails and is
+            # retried, rather than overwriting rows already in the file.
+            existing_records = read_existing_records(
+                client, remote_path, csv_header, channel_params, timezone, include_header
+            )
 
-                logger.debug(f"[Remote Prepare] Found existing file at '{remote_path}'")
-
-                existing_records = csv_to_records(existing_csv, csv_header, channel_params, timezone)
+            if existing_records is not None:
                 existing_timestamps = {r.timestamp for r in existing_records}
-
-                logger.debug(f"[Remote Prepare] Checking for new records to append for '{remote_path}'")
-
-                # Check if we have new records to append
-                new_records = []
-                for ts, record in incoming_records.items():
-                    if ts not in existing_timestamps:
-                        new_records.append(record)
-
-                if not new_records:
+                if all(ts in existing_timestamps for ts in incoming_records):
                     logger.debug(f"[Remote Prepare] No new records to append for '{remote_path}'. Skipping..")
                     continue
 
-                logger.debug(f"[Remote Prepare] Found {len(new_records)} new records. Appending...")
-
                 final_records = {r.timestamp: r for r in existing_records}
-            except (FTPError, SFTPError, Exception) as e:
-                # Handle both FTP and SFTP errors, plus any other
-                # file-not-found scenarios
-                logger.debug(
-                    f"[Remote Prepare] No existing file for '{remote_path}' or error accessing it: {e}. Creating new.")
 
             # Append new records to existing ones
             final_records.update(incoming_records)
