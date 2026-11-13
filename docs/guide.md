@@ -699,6 +699,16 @@ is the station's WIGOS id when it has one, otherwise its ADL station id:
 A record with no value for any mapped parameter is not written. Column
 order follows the parameter mappings.
 
+In **Append** mode a run never drops rows already in the day's file. A new
+file is started only when the server reports that the file does not exist.
+If the existing file cannot be checked, downloaded or read, the station's
+dispatch fails and is retried on the next run, and the file is left as it
+was. A parameter mapping added during the day keeps the earlier rows, with
+the new column empty for them; a removed mapping drops its column. The
+SmartMet channel's files have no header, so they are read by column
+position: when the number of mappings changes, the day's file is started
+again and a warning is logged.
+
 ### SmartMet FTP/SFTP Upload
 
 The same transport, shaped for the **FMI SmartMet** server's file import:
